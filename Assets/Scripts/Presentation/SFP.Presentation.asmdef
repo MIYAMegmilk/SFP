@@ -1,0 +1,17 @@
+{
+    "name": "SFP.Presentation",
+    "rootNamespace": "SFP.Presentation",
+    "references": [
+        "SFP.Simulation",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
