@@ -15,6 +15,8 @@ namespace SFP.Simulation
             for (int i = 0; i < openings.Count; i++)
             {
                 var o = openings[i];
+                o.FlowQ = 0f;
+                o.FlowVelocity = 0f;
                 if (!o.IsOpen) continue;
 
                 float waterYA = GetWaterLevelY(graph, o.CompartmentA);
@@ -56,6 +58,10 @@ namespace SFP.Simulation
                 transfer = ClampTransfer(graph, fromId, toId, transfer);
                 ApplyTransfer(graph, fromId, -transfer);
                 ApplyTransfer(graph, toId, transfer);
+
+                float actualQ = transfer / dt;
+                o.FlowQ = (deltaH > 0f) ? actualQ : -actualQ;
+                o.FlowVelocity = actualQ / Math.Max(effectiveArea, 0.01f);
             }
         }
 

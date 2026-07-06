@@ -9,11 +9,15 @@ namespace SFP.Gameplay
         public float Condition = 100f;
         public float NormalDegradation = 0.01f;
         public float SubmergedDegradation = 0.5f;
+        public float RepairRate = 5f;
         public bool IsFunctional => Condition > 0f;
+
+        int _powerNodeId = -1;
+
+        public void SetPowerNodeId(int id) => _powerNodeId = id;
 
         void Update()
         {
-            if (Condition <= 0f) return;
             var bridge = SimulationBridge.Instance;
             if (bridge == null || Compartment == null) return;
 
@@ -22,8 +26,19 @@ namespace SFP.Gameplay
 
             float waterY = bridge.GetInterpolatedWaterLevelY(id);
             bool submerged = transform.position.y < waterY;
-            float rate = submerged ? SubmergedDegradation : NormalDegradation;
-            Condition = Mathf.Max(0f, Condition - rate * Time.deltaTime);
+
+            if (Condition > 0f)
+            {
+                float rate = submerged ? SubmergedDegradation : NormalDegradation;
+                Condition = Mathf.Max(0f, Condition - rate * Time.deltaTime);
+            }
+
+            if (_powerNodeId >= 0 && bridge.PowerGrid != null)
+            {
+                var node = bridge.PowerGrid.GetNode(_powerNodeId);
+                if (node != null)
+                    node.IsEnabled = IsFunctional;
+            }
         }
     }
 }

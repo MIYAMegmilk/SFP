@@ -104,6 +104,42 @@ namespace SFP.Presentation
         }
 
         public bool HasOpening => _opening != null;
+        public Opening Opening => _opening;
+
+        public void Repair()
+        {
+            if (_opening != null)
+            {
+                _opening.IsOpen = false;
+                _opening.Area = 0f;
+                _opening.FlowQ = 0f;
+                _opening.FlowVelocity = 0f;
+            }
+
+            foreach (var w in _walls)
+            {
+                if (w.Original != null)
+                {
+                    var mr = w.Original.GetComponent<MeshRenderer>();
+                    if (mr != null) mr.enabled = true;
+                    var col = w.Original.GetComponent<Collider>();
+                    if (col != null) col.enabled = true;
+                }
+            }
+
+            foreach (var go in _managed)
+                if (go) Destroy(go);
+            _managed.Clear();
+
+            var emitter = GetComponent<PhysicsWaterEmitter>();
+            if (emitter != null) Destroy(emitter);
+
+            foreach (var comp in GetComponents<MonoBehaviour>())
+            {
+                if (comp != this && comp != null)
+                    Destroy(comp);
+            }
+        }
 
         void OnDestroy()
         {
@@ -159,7 +195,7 @@ namespace SFP.Presentation
 
             var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = "WallSeg";
-            Destroy(go.GetComponent<Collider>());
+            go.isStatic = true;
             go.GetComponent<MeshRenderer>().sharedMaterial = w.Mat;
             PlaceCube(go, w, aMin, aMax, bMin, bMax, 1f);
             _managed.Add(go);

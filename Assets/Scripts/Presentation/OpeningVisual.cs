@@ -72,15 +72,18 @@ namespace SFP.Presentation
                 holeWorldB = side;
             }
 
-            var overlaps = Physics.OverlapBox(transform.position, Vector3.one * 0.3f);
+            var overlaps = Physics.OverlapBox(transform.position, Vector3.one * 0.3f,
+                Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
             foreach (var col in overlaps)
             {
                 var go = col.gameObject;
-                // Only cut actual walls/floors, not opening panels
                 if (go.transform.parent == transform) continue;
                 if (go.name.Contains("Panel") || go.name.Contains("Frame") ||
                     go.name.Contains("Hole") || go.name.Contains("Edge") ||
                     go.name.Contains("Seg")) continue;
+
+                var mr = go.GetComponent<MeshRenderer>();
+                if (mr == null) continue;
 
                 var wt = go.transform;
                 var scale = wt.lossyScale;
@@ -103,12 +106,9 @@ namespace SFP.Presentation
                     Thin = thin,
                     AxA = axA,
                     AxB = axB,
-                    Mat = go.GetComponent<MeshRenderer>().sharedMaterial
+                    Mat = mr.sharedMaterial
                 });
 
-                // Compute hole extents in this wall's local space
-                // For doors (thin on X): axA=Y, axB=Z → holeA=height, holeB=width
-                // For hatches (thin on Y): axA=Z, axB=X → holeA=sideZ, holeB=sideX
                 _holeA = (holeWorldA * 0.5f) / scale[axA];
                 _holeB = (holeWorldB * 0.5f) / scale[axB];
             }
@@ -186,7 +186,6 @@ namespace SFP.Presentation
             if (aMax - aMin < 0.001f || bMax - bMin < 0.001f) return;
             var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = "DoorWallSeg";
-            Destroy(go.GetComponent<Collider>());
             go.GetComponent<MeshRenderer>().sharedMaterial = w.Mat;
             Place(go, w, aMin, aMax, bMin, bMax, 1f);
             _segments.Add(go);

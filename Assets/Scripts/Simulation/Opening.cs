@@ -12,6 +12,8 @@ namespace SFP.Simulation
         public float CenterY;
         public float Height;
         public bool IsOpen;
+        public float FlowQ;
+        public float FlowVelocity;
 
         public const int Sea = -1;
 

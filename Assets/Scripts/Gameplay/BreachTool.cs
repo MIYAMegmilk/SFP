@@ -18,6 +18,8 @@ namespace SFP.Gameplay
             if (mouse == null) return;
             if (!mouse.leftButton.wasPressedThisFrame) return;
             if (mouse.rightButton.isPressed) return;
+            var kb = Keyboard.current;
+            if (kb != null && kb.rKey.isPressed) return;
 
             var ray = Camera.main.ScreenPointToRay(mouse.position.ReadValue());
             if (!Physics.Raycast(ray, out var hit, MaxDistance)) return;
@@ -31,26 +33,33 @@ namespace SFP.Gameplay
             int thisId = bridge.GetCompartmentId(compDef);
             if (thisId < 0) return;
 
-            // Check if there's another compartment on the other side of the wall
+            bool isFloorOrCeiling = Mathf.Abs(hit.normal.y) > 0.7f;
+
             int otherId = FindAdjacentCompartment(bridge, hit.point, hit.normal, compDef);
 
-            // Determine if this is a hull (exterior) wall by checking if the hit wall name contains "WallN"
-            // or if it's on the outer boundary of the ship
-            bool isHullWall = IsHullWall(hit.collider.gameObject, compDef);
+            bool isHullSurface = isFloorOrCeiling
+                ? IsHullFloor(compDef, hit.normal)
+                : IsHullWall(hit.collider.gameObject, compDef);
 
             Opening opening = null;
             if (otherId >= 0)
             {
-                // Internal wall: create opening between two compartments
                 opening = bridge.Graph.AddOpening(OpeningKind.Breach, thisId, otherId,
                     InitialArea, hit.point.y, 0.3f);
+
+                if (bridge.WaterSystem != null)
+                {
+                    float sillY = hit.point.y - 0.15f;
+                    float w = Mathf.Sqrt(InitialArea);
+                    bridge.WaterSystem.AddConnection(opening, thisId, otherId,
+                        hit.point.x, hit.point.z, w, sillY, isFloorOrCeiling);
+                }
             }
-            else if (isHullWall)
+            else if (isHullSurface)
             {
-                // External hull wall: breach to sea
-                opening = bridge.AddBreachAtRuntime(compDef, InitialArea, hit.point.y, 0.3f);
+                opening = bridge.AddBreachAtRuntime(compDef, InitialArea, hit.point.y, 0.3f,
+                    hit.point.x, hit.point.z);
             }
-            // else: internal wall with no neighbor found — visual hole only, no water
 
             var vfxGo = new GameObject($"Breach_{(opening != null ? opening.Id : -1)}");
             vfxGo.transform.position = hit.point;
@@ -58,14 +67,40 @@ namespace SFP.Gameplay
 
             if (opening != null)
             {
-                var vfx = vfxGo.AddComponent<BreachVFX>();
-                vfx.Init(opening);
+                Vector3 posDir = opening.CompartmentA == Opening.Sea
+                    ? hit.normal : -hit.normal;
+                vfxGo.AddComponent<PhysicsWaterEmitter>()
+                    .Init(opening, null, posDir);
                 var grower = vfxGo.AddComponent<BreachGrower>();
                 grower.Init(opening, MaxArea, GrowthRate);
             }
 
             var visual = vfxGo.AddComponent<BreachVisual>();
             visual.Init(opening, hit);
+        }
+
+        bool IsHullFloor(CompartmentDefinition comp, Vector3 normal)
+        {
+            bool hitFromAbove = normal.y > 0f;
+            var allComps = FindObjectsByType<CompartmentDefinition>(FindObjectsSortMode.None);
+
+            if (hitFromAbove)
+            {
+                float minFloor = float.MaxValue;
+                foreach (var c in allComps)
+                    if (c.FloorY < minFloor) minFloor = c.FloorY;
+                return Mathf.Abs(comp.FloorY - minFloor) < 0.1f;
+            }
+            else
+            {
+                float maxCeiling = float.MinValue;
+                foreach (var c in allComps)
+                {
+                    float ceil = c.FloorY + c.Height;
+                    if (ceil > maxCeiling) maxCeiling = ceil;
+                }
+                return Mathf.Abs((comp.FloorY + comp.Height) - maxCeiling) < 0.1f;
+            }
         }
 
         bool IsHullWall(GameObject wallGo, CompartmentDefinition comp)
