@@ -7,6 +7,8 @@ namespace SFP.Gameplay
     public class MissionManager : MonoBehaviour
     {
         MissionSystem _missions;
+        float _roundCompleteTimer;
+        int _lastRound;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Bootstrap()
@@ -27,11 +29,23 @@ namespace SFP.Gameplay
             {
                 if (bridge.Map == null) return;
                 _missions = new MissionSystem(bridge.MapSeed, bridge.Map);
+                _lastRound = _missions.Round;
             }
 
             if (bridge.SubState != null)
                 _missions.Tick(Time.deltaTime, bridge.SubState);
+
+            if (_missions.Round != _lastRound)
+            {
+                _roundCompleteTimer = 3f;
+                _lastRound = _missions.Round;
+            }
+
+            if (_roundCompleteTimer > 0f)
+                _roundCompleteTimer -= Time.deltaTime;
         }
+
+        public MissionSystem Missions => _missions;
 
         void OnGUI()
         {
@@ -39,28 +53,55 @@ namespace SFP.Gameplay
 
             var bridge = SimulationBridge.Instance;
             var sub = bridge?.SubState;
-
             float sw = Screen.width;
+
+            // Round complete banner
+            if (_roundCompleteTimer > 0f)
+            {
+                float alpha = Mathf.Clamp01(_roundCompleteTimer);
+                var bannerStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 20,
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = new Color(0.3f, 1f, 0.3f, alpha) }
+                };
+                GUI.Label(new Rect(0, Screen.height * 0.35f, sw, 30),
+                    $"ROUND {_missions.Round - 1} COMPLETE — NEW ORDERS RECEIVED", bannerStyle);
+            }
+
             var current = _missions.Current;
 
+            // Phase / round header
+            string phaseLabel = _missions.Phase == MissionPhase.Returning ? "RTB" : "PATROL";
+            var headerStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                alignment = TextAnchor.UpperCenter,
+                normal = { textColor = new Color(0.7f, 0.7f, 0.7f) }
+            };
+            GUI.Label(new Rect(0, 68, sw, 16),
+                $"ROUND {_missions.Round}  |  {phaseLabel}  |  {_missions.CompletedCount}/{_missions.TotalCount}", headerStyle);
+
+            // Current objective
             string text;
             Color color;
             if (current == null)
             {
-                text = $"ALL OBJECTIVES COMPLETE ({_missions.TotalCount}/{_missions.TotalCount})";
+                text = "STANDING BY...";
                 color = Color.green;
             }
             else
             {
-                color = new Color(1f, 0.85f, 0.4f);
+                color = _missions.Phase == MissionPhase.Returning
+                    ? new Color(0.4f, 0.8f, 1f)
+                    : new Color(1f, 0.85f, 0.4f);
+
                 float dist = sub != null ? _missions.DistanceToTarget(sub) : 0f;
                 string hint = "";
                 if (sub != null)
                 {
-                    float dx = current.TargetX - sub.PositionX;
-                    float dz = current.TargetZ - sub.PositionZ;
-                    float bearing = Mathf.Atan2(dx, dz) * Mathf.Rad2Deg;
-                    if (bearing < 0f) bearing += 360f;
+                    float bearing = _missions.BearingToTarget(sub);
                     float delta = Mathf.DeltaAngle(sub.Heading, bearing);
                     hint = delta < -10f ? " <<" : delta > 10f ? " >>" : " ^";
                 }
@@ -80,7 +121,7 @@ namespace SFP.Gameplay
                 alignment = TextAnchor.UpperCenter,
                 normal = { textColor = color }
             };
-            GUI.Label(new Rect(0, 80, sw, 20), text, style);
+            GUI.Label(new Rect(0, 82, sw, 20), text, style);
         }
     }
 }

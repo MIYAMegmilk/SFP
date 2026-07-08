@@ -14,14 +14,12 @@ namespace SFP.Tests
             public string Label;
         }
 
-        // Drains the mission queue by teleporting a stub sub onto each target in turn,
-        // recording targets in order. Does not rely on any API beyond the public contract.
-        static List<QueuedTarget> DrainQueue(MissionSystem ms)
+        static List<QueuedTarget> DrainOutbound(MissionSystem ms)
         {
             var result = new List<QueuedTarget>();
             var sub = new SubmarineState();
             int guard = 0;
-            while (ms.Current != null && guard++ < 64)
+            while (ms.Current != null && ms.Phase == MissionPhase.Outbound && guard++ < 64)
             {
                 var m = ms.Current;
                 result.Add(new QueuedTarget { Kind = m.Kind, X = m.TargetX, Z = m.TargetZ, Label = m.Label });
@@ -40,8 +38,8 @@ namespace SFP.Tests
             var a = new MissionSystem(21, map);
             var b = new MissionSystem(21, map);
 
-            var targetsA = DrainQueue(a);
-            var targetsB = DrainQueue(b);
+            var targetsA = DrainOutbound(a);
+            var targetsB = DrainOutbound(b);
 
             Assert.AreEqual(targetsA.Count, targetsB.Count);
             Assert.Greater(targetsA.Count, 0);
@@ -89,32 +87,52 @@ namespace SFP.Tests
         }
 
         [Test]
-        public void HoldPosition_ProgressAccumulatesInsideRadius_ResetsOutside_CompletesAtThreshold()
+        public void OutboundComplete_TransitionsToReturning()
         {
-            // Tiny world: channel waypoint generation degenerates to just the spawn point,
-            // so the only mission is the final HoldPosition (its deep point also falls back
-            // to spawn, since the border margin exceeds the world size).
-            var map = MapGenerator.Generate(3, worldSize: 200f, cellSize: 8f);
-            var missions = new MissionSystem(3, map);
+            var map = MapGenerator.Generate(11);
+            var missions = new MissionSystem(11, map);
+            Assert.AreEqual(MissionPhase.Outbound, missions.Phase);
 
-            var hold = missions.Current;
-            Assert.IsNotNull(hold);
-            Assert.AreEqual(MissionKind.HoldPosition, hold.Kind);
+            var sub = new SubmarineState();
+            int guard = 0;
+            while (missions.Phase == MissionPhase.Outbound && guard++ < 64)
+            {
+                var m = missions.Current;
+                if (m == null) break;
+                sub.PositionX = m.TargetX;
+                sub.PositionZ = m.TargetZ;
+                float dt = m.Kind == MissionKind.HoldPosition ? m.HoldSeconds + 1f : 0.1f;
+                missions.Tick(dt, sub);
+            }
 
-            var sub = new SubmarineState { PositionX = hold.TargetX, PositionZ = hold.TargetZ };
+            Assert.AreEqual(MissionPhase.Returning, missions.Phase);
+            Assert.IsNotNull(missions.Current);
+            Assert.AreEqual("Return to base", missions.Current.Label);
+        }
 
-            missions.Tick(10f, sub);
-            Assert.AreEqual(10f, hold.HoldProgress, 1e-4f);
+        [Test]
+        public void ReturnComplete_AdvancesToNextRound()
+        {
+            var map = MapGenerator.Generate(11);
+            var missions = new MissionSystem(11, map);
+            Assert.AreEqual(1, missions.Round);
 
-            sub.PositionX = hold.TargetX + hold.Radius + 50f;
-            missions.Tick(1f, sub);
-            Assert.AreEqual(0f, hold.HoldProgress, 1e-4f);
+            var sub = new SubmarineState();
+            int guard = 0;
+            int startRound = missions.Round;
+            while (missions.Round == startRound && guard++ < 128)
+            {
+                var m = missions.Current;
+                if (m == null) { missions.Tick(0.1f, sub); continue; }
+                sub.PositionX = m.TargetX;
+                sub.PositionZ = m.TargetZ;
+                float dt = m.Kind == MissionKind.HoldPosition ? m.HoldSeconds + 1f : 0.1f;
+                missions.Tick(dt, sub);
+            }
 
-            sub.PositionX = hold.TargetX;
-            missions.Tick(hold.HoldSeconds, sub);
-
-            Assert.IsNull(missions.Current);
-            Assert.AreEqual(1, missions.CompletedCount);
+            Assert.AreEqual(2, missions.Round);
+            Assert.AreEqual(MissionPhase.Outbound, missions.Phase);
+            Assert.IsNotNull(missions.Current);
         }
 
         [Test]
@@ -122,7 +140,7 @@ namespace SFP.Tests
         {
             var map = MapGenerator.Generate(5);
             var missions = new MissionSystem(5, map);
-            var targets = DrainQueue(missions);
+            var targets = DrainOutbound(missions);
 
             Assert.Greater(targets.Count, 0);
             foreach (var t in targets)
@@ -135,6 +153,41 @@ namespace SFP.Tests
                 float floor = map.GetFloorDepthAt(t.X, t.Z);
                 Assert.GreaterOrEqual(floor, 200f, $"target ({t.X},{t.Z})");
             }
+        }
+
+        [Test]
+        public void DifferentRounds_ProduceDifferentWaypointOrder()
+        {
+            var map = MapGenerator.Generate(42);
+            var missions = new MissionSystem(42, map);
+            var round1 = DrainOutbound(missions);
+
+            var sub = new SubmarineState();
+            // Complete return phase
+            while (missions.Round == 1)
+            {
+                var m = missions.Current;
+                if (m == null) { missions.Tick(0.1f, sub); continue; }
+                sub.PositionX = m.TargetX;
+                sub.PositionZ = m.TargetZ;
+                float dt = m.Kind == MissionKind.HoldPosition ? m.HoldSeconds + 1f : 0.1f;
+                missions.Tick(dt, sub);
+            }
+
+            var round2 = DrainOutbound(missions);
+
+            Assert.AreEqual(round1.Count, round2.Count);
+            bool anyDifferent = false;
+            for (int i = 0; i < round1.Count; i++)
+            {
+                if (System.Math.Abs(round1[i].X - round2[i].X) > 1f ||
+                    System.Math.Abs(round1[i].Z - round2[i].Z) > 1f)
+                {
+                    anyDifferent = true;
+                    break;
+                }
+            }
+            Assert.IsTrue(anyDifferent, "Round 2 should have different waypoint selection/order than round 1");
         }
     }
 }

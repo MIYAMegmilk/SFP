@@ -4,15 +4,16 @@ using System.Collections.Generic;
 namespace SFP.Simulation
 {
     public enum MissionKind { ReachPoint, HoldPosition }
+    public enum MissionPhase { Outbound, Returning }
 
     public sealed class Mission
     {
         public MissionKind Kind;
         public float TargetX, TargetZ;
         public float Radius = 100f;
-        public float HoldSeconds;        // HoldPosition only (e.g. 30)
+        public float HoldSeconds;
         public float HoldProgress;
-        public string Label;             // "Reach waypoint 3", "Survey site B"
+        public string Label;
     }
 
     public sealed class MissionSystem
@@ -21,44 +22,121 @@ namespace SFP.Simulation
         const float DeepPointMinFloor = 400f;
         const float DeepPointBorderMargin = 300f;
         const int DeepPointMaxAttempts = 4000;
+        const int WaypointsPerRound = 3;
+
+        readonly MapData _map;
+        readonly float _baseX, _baseZ;
+        int _seed;
 
         readonly List<Mission> _missions = new();
         int _currentIndex;
 
+        public MissionPhase Phase { get; private set; } = MissionPhase.Outbound;
+        public int Round { get; private set; } = 1;
         public Mission Current => _currentIndex < _missions.Count ? _missions[_currentIndex] : null;
         public int CompletedCount => _currentIndex;
         public int TotalCount => _missions.Count;
 
         public MissionSystem(int seed, MapData map)
         {
-            var waypoints = map?.ChannelWaypoints;
-            if (waypoints != null)
+            _seed = seed;
+            _map = map;
+            _baseX = map?.SpawnX ?? 0f;
+            _baseZ = map?.SpawnZ ?? 0f;
+
+            GenerateRound();
+        }
+
+        void GenerateRound()
+        {
+            _missions.Clear();
+            _currentIndex = 0;
+            Phase = MissionPhase.Outbound;
+
+            if (_map == null) return;
+
+            var waypoints = PickWaypoints();
+            for (int i = 0; i < waypoints.Count; i++)
             {
-                for (int i = 1; i < waypoints.Count; i++)
+                var wp = waypoints[i];
+                bool isSurvey = (i == waypoints.Count - 1) && Round % 2 == 0;
+                if (isSurvey)
                 {
-                    var wp = waypoints[i];
+                    _missions.Add(new Mission
+                    {
+                        Kind = MissionKind.HoldPosition,
+                        TargetX = wp.X,
+                        TargetZ = wp.Z,
+                        HoldSeconds = HoldPositionSeconds,
+                        Label = $"Survey site {(char)('A' + i)}",
+                    });
+                }
+                else
+                {
                     _missions.Add(new Mission
                     {
                         Kind = MissionKind.ReachPoint,
                         TargetX = wp.X,
                         TargetZ = wp.Z,
-                        Label = $"Reach waypoint {i}",
+                        Label = $"Navigate to point {(char)('A' + i)}",
                     });
                 }
             }
+        }
 
-            if (map != null)
+        List<(float X, float Z)> PickWaypoints()
+        {
+            var allWaypoints = _map.ChannelWaypoints;
+            if (allWaypoints == null || allWaypoints.Count <= 1) return new List<(float, float)>();
+
+            // Exclude spawn (index 0), shuffle the rest deterministically per round
+            var candidates = new List<(float X, float Z)>();
+            for (int i = 1; i < allWaypoints.Count; i++)
+                candidates.Add(allWaypoints[i]);
+
+            // Fisher-Yates with hash-based determinism
+            int shuffleSeed = _seed + Round * 7919;
+            for (int i = candidates.Count - 1; i > 0; i--)
             {
-                var deep = FindDeepPoint(seed, map);
-                _missions.Add(new Mission
-                {
-                    Kind = MissionKind.HoldPosition,
-                    TargetX = deep.X,
-                    TargetZ = deep.Z,
-                    HoldSeconds = HoldPositionSeconds,
-                    Label = "Survey site B",
-                });
+                int j = (int)(Hash(i, Round, shuffleSeed) % (uint)(i + 1));
+                var tmp = candidates[i];
+                candidates[i] = candidates[j];
+                candidates[j] = tmp;
             }
+
+            int count = Math.Min(WaypointsPerRound, candidates.Count);
+
+            // On even rounds, try to place the last waypoint at a deep point for survey
+            if (Round % 2 == 0)
+            {
+                var deep = FindDeepPoint(shuffleSeed, _map);
+                if (count > 0)
+                    candidates[count - 1] = deep;
+            }
+
+            return candidates.GetRange(0, count);
+        }
+
+        void StartReturn()
+        {
+            Phase = MissionPhase.Returning;
+            _missions.Clear();
+            _currentIndex = 0;
+            _missions.Add(new Mission
+            {
+                Kind = MissionKind.ReachPoint,
+                TargetX = _baseX,
+                TargetZ = _baseZ,
+                Radius = 120f,
+                Label = "Return to base",
+            });
+        }
+
+        void StartNextRound()
+        {
+            Round++;
+            _seed += 13;
+            GenerateRound();
         }
 
         public float DistanceToTarget(SubmarineState sub)
@@ -70,10 +148,28 @@ namespace SFP.Simulation
             return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
+        public float BearingToTarget(SubmarineState sub)
+        {
+            var m = Current;
+            if (m == null || sub == null) return 0f;
+            float dx = m.TargetX - sub.PositionX;
+            float dz = m.TargetZ - sub.PositionZ;
+            float bearing = (float)(Math.Atan2(dx, dz) * (180.0 / Math.PI));
+            if (bearing < 0f) bearing += 360f;
+            return bearing;
+        }
+
         public void Tick(float dt, SubmarineState sub)
         {
             var m = Current;
-            if (m == null || sub == null) return;
+            if (m == null || sub == null)
+            {
+                if (m == null && Phase == MissionPhase.Outbound)
+                    StartReturn();
+                else if (m == null && Phase == MissionPhase.Returning)
+                    StartNextRound();
+                return;
+            }
 
             float dist = DistanceToTarget(sub);
             switch (m.Kind)
@@ -93,6 +189,15 @@ namespace SFP.Simulation
                         m.HoldProgress = 0f;
                     }
                     break;
+            }
+
+            // Check if we just completed the last mission in this phase
+            if (_currentIndex >= _missions.Count)
+            {
+                if (Phase == MissionPhase.Outbound)
+                    StartReturn();
+                else if (Phase == MissionPhase.Returning)
+                    StartNextRound();
             }
         }
 

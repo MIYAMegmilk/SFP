@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
@@ -81,9 +82,22 @@ namespace SFP.Gameplay
                     nav.DesiredDepth = Mathf.Max(0f, nav.DesiredDepth - depthSpeed);
                 if (kb.downArrowKey.isPressed)
                     nav.DesiredDepth += depthSpeed;
-                // Setting a depth target re-arms auto depth hold after manual pump override.
                 if (kb.upArrowKey.isPressed || kb.downArrowKey.isPressed)
                     nav.DepthHoldEnabled = true;
+
+                // M: set autopilot heading/speed toward current mission objective
+                if (kb.mKey.wasPressedThisFrame)
+                {
+                    var mm = FindFirstObjectByType<MissionManager>();
+                    var missions = mm?.Missions;
+                    if (missions?.Current != null)
+                    {
+                        float bearing = missions.BearingToTarget(sub);
+                        nav.DesiredHeading = bearing;
+                        nav.DesiredSpeed = 4f;
+                        nav.AutoPilotEnabled = true;
+                    }
+                }
             }
 
             var waypoints = bridge.Map?.ChannelWaypoints;
@@ -204,7 +218,7 @@ namespace SFP.Gameplay
                 GUI.Label(new Rect(lx, y, panelW, 20),
                     $"WP {idx}/{waypoints.Count}: {wdist:F0}m brg {bearing:F0}°  {turnHint}", wpStyle);
                 y += 20f;
-                GUI.Label(new Rect(lx, y, panelW, 20), "(N: next)", style);
+                GUI.Label(new Rect(lx, y, panelW, 20), "(N: next  M: autopilot to mission)", style);
                 y += 22f;
             }
 
