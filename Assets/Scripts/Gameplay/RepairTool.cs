@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
@@ -8,17 +9,25 @@ namespace SFP.Gameplay
     {
         public float MaxDistance = 50f;
         public float RepairRadius = 2f;
-        public float RepairRate = 0.08f;
+        public float PatchRate = 0.5f;
+        public float SealRate = 0.02f;
 
         BreachVisual _activeTarget;
+        float _sealStartArea;
+
+        public BreachVisual ActiveTarget => _activeTarget;
+        public float DisplayProgress { get; private set; }
+        public string StageLabel { get; private set; }
 
         void Update()
         {
             var kb = Keyboard.current;
             if (kb == null || !kb.tKey.isPressed)
             {
-                ResumeGrower();
+                ResumeGrowth();
                 _activeTarget = null;
+                DisplayProgress = 0f;
+                StageLabel = null;
                 return;
             }
 
@@ -30,36 +39,57 @@ namespace SFP.Gameplay
 
             if (breach == null || !breach.HasOpening)
             {
-                ResumeGrower();
+                ResumeGrowth();
                 _activeTarget = null;
+                DisplayProgress = 0f;
+                StageLabel = null;
                 return;
             }
 
             if (_activeTarget != breach)
             {
-                ResumeGrower();
+                ResumeGrowth();
                 _activeTarget = breach;
+                _sealStartArea = breach.Opening.Area;
             }
 
-            var grower = breach.GetComponent<BreachGrower>();
-            if (grower != null) grower.enabled = false;
+            var bridge = SimulationBridge.Instance;
+            if (bridge == null) return;
 
-            var opening = breach.Opening;
-            opening.Area -= RepairRate * Time.deltaTime;
+            bridge.DamageSystem.SetRepairing(breach.Opening.Id, true);
+            var stage = bridge.DamageSystem.GetRepairStage(breach.Opening.Id);
 
-            if (opening.Area <= 0f)
+            if (stage == BreachRepairStage.None)
             {
-                breach.Repair();
-                Destroy(breach.gameObject);
-                _activeTarget = null;
+                bridge.DamageSystem.AddPatchProgress(breach.Opening.Id, PatchRate * Time.deltaTime);
+                DisplayProgress = bridge.DamageSystem.GetPatchProgress(breach.Opening.Id);
+                StageLabel = "PATCHING";
+            }
+            else
+            {
+                var opening = breach.Opening;
+                opening.Area -= SealRate * Time.deltaTime;
+                DisplayProgress = 1f - opening.Area / Mathf.Max(0.01f, _sealStartArea);
+                StageLabel = "WELDING";
+
+                if (opening.Area <= 0f)
+                {
+                    bridge.DamageSystem.UnregisterBreach(opening.Id);
+                    breach.Repair();
+                    Destroy(breach.gameObject);
+                    _activeTarget = null;
+                    DisplayProgress = 0f;
+                    StageLabel = null;
+                }
             }
         }
 
-        void ResumeGrower()
+        void ResumeGrowth()
         {
             if (_activeTarget == null) return;
-            var grower = _activeTarget.GetComponent<BreachGrower>();
-            if (grower != null) grower.enabled = true;
+            var bridge = SimulationBridge.Instance;
+            if (bridge != null && _activeTarget.HasOpening)
+                bridge.DamageSystem.SetRepairing(_activeTarget.Opening.Id, false);
         }
 
         BreachVisual FindClosestBreachOnRay(Ray ray)

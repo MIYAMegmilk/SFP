@@ -7,8 +7,12 @@ namespace SFP.Gameplay
     public class SteeringInteraction : MonoBehaviour
     {
         public float MaxDistance = 3f;
+        public float WaypointArrivalDistance = 80f;
 
         bool _isSteering;
+        int _targetWaypointIndex = 1;
+
+        public bool IsSteering => _isSteering;
 
         void Update()
         {
@@ -31,17 +35,20 @@ namespace SFP.Gameplay
             if (hit.collider.GetComponentInParent<NavigationTerminalDefinition>() == null) return;
 
             _isSteering = true;
+            ConsoleFocus.Acquire(this);
         }
 
         void UpdateSteering(Keyboard kb)
         {
+            var bridge = SimulationBridge.Instance;
             if (kb.escapeKey.wasPressedThisFrame || kb.eKey.wasPressedThisFrame)
             {
                 _isSteering = false;
+                ConsoleFocus.Release(this);
+                if (bridge?.SubState != null) bridge.SubState.RudderAngle = 0f;
                 return;
             }
 
-            var bridge = SimulationBridge.Instance;
             if (bridge == null) return;
 
             var engine = bridge.Engine;
@@ -50,7 +57,6 @@ namespace SFP.Gameplay
             if (sub == null) return;
 
             float throttleSpeed = 0.5f * Time.deltaTime;
-            float rudderSpeed = 30f * Time.deltaTime;
             float depthSpeed = 10f * Time.deltaTime;
 
             if (engine != null)
@@ -61,8 +67,10 @@ namespace SFP.Gameplay
                     engine.ThrottleSetting = Mathf.Clamp(engine.ThrottleSetting - throttleSpeed, -1f, 1f);
             }
 
-            if (kb.aKey.isPressed) sub.Heading -= rudderSpeed;
-            if (kb.dKey.isPressed) sub.Heading += rudderSpeed;
+            float rudder = 0f;
+            if (kb.aKey.isPressed) rudder -= 1f;
+            if (kb.dKey.isPressed) rudder += 1f;
+            sub.RudderAngle = rudder;
 
             if (nav != null)
             {
@@ -73,6 +81,25 @@ namespace SFP.Gameplay
                     nav.DesiredDepth = Mathf.Max(0f, nav.DesiredDepth - depthSpeed);
                 if (kb.downArrowKey.isPressed)
                     nav.DesiredDepth += depthSpeed;
+                // Setting a depth target re-arms auto depth hold after manual pump override.
+                if (kb.upArrowKey.isPressed || kb.downArrowKey.isPressed)
+                    nav.DepthHoldEnabled = true;
+            }
+
+            var waypoints = bridge.Map?.ChannelWaypoints;
+            if (waypoints != null && waypoints.Count > 0)
+            {
+                if (_targetWaypointIndex >= waypoints.Count) _targetWaypointIndex = 0;
+
+                if (kb.nKey.wasPressedThisFrame)
+                    _targetWaypointIndex = (_targetWaypointIndex + 1) % waypoints.Count;
+
+                var wp = waypoints[_targetWaypointIndex];
+                float wdx = wp.X - sub.PositionX;
+                float wdz = wp.Z - sub.PositionZ;
+                float wdist = Mathf.Sqrt(wdx * wdx + wdz * wdz);
+                if (wdist < WaypointArrivalDistance)
+                    _targetWaypointIndex = (_targetWaypointIndex + 1) % waypoints.Count;
             }
         }
 
@@ -86,11 +113,22 @@ namespace SFP.Gameplay
             var sub = bridge.SubState;
             var engine = bridge.Engine;
             var nav = bridge.Navigation;
+            var waypoints = bridge.Map?.ChannelWaypoints;
+            bool showWaypoint = waypoints != null && waypoints.Count > 0;
 
             float cx = Screen.width * 0.5f;
             float top = Screen.height * 0.25f;
             float panelW = 300f;
-            float panelH = 220f;
+            float panelH = 240f;
+            if (showWaypoint) panelH += 40f;
+
+            // Fused console (Tier 2+): the sonar UI is open alongside on the same console —
+            // dock the helm panel to the left of the sonar circle so the two don't overlap.
+            if (TryGetComponent<SonarInteraction>(out var fusedSonar) && fusedSonar.IsUsing)
+            {
+                cx = Screen.width * 0.5f - 130f - 24f - panelW * 0.5f;
+                top = Screen.height * 0.5f - panelH * 0.5f;
+            }
 
             GUI.Box(new Rect(cx - panelW * 0.5f, top, panelW, panelH), "");
 
@@ -124,16 +162,50 @@ namespace SFP.Gameplay
                 throttle >= 0 ? Color.green : Color.red);
             y += 35f;
 
-            GUI.Label(new Rect(lx, y, panelW, 20), $"Heading: A/D  |  Depth Target: Up/Down", style);
+            string rudderLabel = sub.RudderAngle < -0.1f ? "◄ PORT" : sub.RudderAngle > 0.1f ? "STBD ►" : "CENTER";
+            GUI.Label(new Rect(lx, y, panelW, 20), $"Rudder: {rudderLabel}  [A/D]", style);
+            y += 20f;
+            GUI.Label(new Rect(lx, y, panelW, 20), $"Depth Target: Up/Down", style);
             y += 22f;
 
             if (nav != null)
             {
+                string dhStatus = nav.DepthHoldEnabled ? "AUTO" : "MANUAL";
+                Color dhColor = nav.DepthHoldEnabled ? Color.green : new Color(1f, 0.7f, 0.2f);
+                var dhStyle = new GUIStyle(style) { normal = { textColor = dhColor } };
+                GUI.Label(new Rect(lx, y, panelW, 20),
+                    $"Depth Hold: {dhStatus}  Target: {nav.DesiredDepth:F0}m", dhStyle);
+                y += 22f;
+
                 string apStatus = nav.AutoPilotEnabled ? "ON" : "OFF";
                 Color apColor = nav.AutoPilotEnabled ? Color.green : Color.gray;
                 var apStyle = new GUIStyle(style) { normal = { textColor = apColor } };
                 GUI.Label(new Rect(lx, y, panelW, 20),
-                    $"AutoPilot: {apStatus} [Tab]  Target: {nav.DesiredDepth:F0}m", apStyle);
+                    $"AutoPilot (speed/heading): {apStatus} [Tab]", apStyle);
+                y += 22f;
+            }
+
+            if (showWaypoint)
+            {
+                int idx = _targetWaypointIndex >= waypoints.Count ? 0 : _targetWaypointIndex;
+                var wp = waypoints[idx];
+                float wdx = wp.X - sub.PositionX;
+                float wdz = wp.Z - sub.PositionZ;
+                float wdist = Mathf.Sqrt(wdx * wdx + wdz * wdz);
+                float bearing = Mathf.Atan2(wdx, wdz) * Mathf.Rad2Deg;
+                if (bearing < 0f) bearing += 360f;
+                float delta = Mathf.DeltaAngle(sub.Heading, bearing);
+
+                string turnHint = delta < -10f ? "<<" : delta > 10f ? ">>" : "ON COURSE";
+                bool onCourse = delta >= -10f && delta <= 10f;
+                Color wpColor = onCourse ? new Color(0.4f, 1f, 1f) : Color.white;
+                var wpStyle = new GUIStyle(style) { normal = { textColor = wpColor } };
+
+                GUI.Label(new Rect(lx, y, panelW, 20),
+                    $"WP {idx}/{waypoints.Count}: {wdist:F0}m brg {bearing:F0}°  {turnHint}", wpStyle);
+                y += 20f;
+                GUI.Label(new Rect(lx, y, panelW, 20), "(N: next)", style);
+                y += 22f;
             }
 
             var hintStyle = new GUIStyle(GUI.skin.label)

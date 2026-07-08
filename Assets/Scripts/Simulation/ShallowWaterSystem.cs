@@ -224,6 +224,11 @@ namespace SFP.Simulation
                 bool isVertical = conn.IsVertical;
                 float cellArea = gA.CellSize * gA.CellSize;
 
+                var compA = _graph.GetCompartment(gA.Id);
+                var compB = _graph.GetCompartment(gB.Id);
+                float pressureHead = (compA.AirPressureAtm - compB.AirPressureAtm)
+                    * AirPressureMath.MetersPerAtm;
+
                 for (int i = 0; i < conn.CellsA.Length; i++)
                 {
                     int idxA = conn.CellsA[i];
@@ -249,7 +254,11 @@ namespace SFP.Simulation
 
                         float headDn = Math.Max(0f, gDn.FloorY + hDn - conn.SillY);
                         float headUp = hUp;
-                        float netHead = headDn - headUp;
+                        var compUp = _graph.GetCompartment(gUp.Id);
+                        var compDn = _graph.GetCompartment(gDn.Id);
+                        float netHead = (headDn - headUp)
+                            + (compDn.AirPressureAtm - compUp.AirPressureAtm)
+                            * AirPressureMath.MetersPerAtm;
 
                         if (Math.Abs(netHead) < 0.005f) continue;
 
@@ -285,7 +294,7 @@ namespace SFP.Simulation
                     {
                         float effectiveA = Math.Max(0f, absYA - sill);
                         float effectiveB = Math.Max(0f, absYB - sill);
-                        float dh = effectiveA - effectiveB;
+                        float dh = (effectiveA - effectiveB) + pressureHead;
 
                         if (Math.Abs(dh) < 0.005f) continue;
 
@@ -298,17 +307,25 @@ namespace SFP.Simulation
                     if (flow > 0f)
                     {
                         float maxTransfer = gA.H[idxA] * cellArea * 0.5f;
-                        flow = Math.Min(flow, maxTransfer);
-                        RemoveWater(gA, idxA, flow);
-                        AddWaterSpread(gB, idxB, flow);
+                        float maxAccept = (gB.RoomHeight - gB.H[idxB]) * cellArea;
+                        flow = Math.Min(flow, Math.Min(maxTransfer, maxAccept));
+                        if (flow > 1e-6f)
+                        {
+                            RemoveWater(gA, idxA, flow);
+                            AddWaterSpread(gB, idxB, flow);
+                        }
                     }
                     else if (flow < 0f)
                     {
                         flow = -flow;
                         float maxTransfer = gB.H[idxB] * cellArea * 0.5f;
-                        flow = Math.Min(flow, maxTransfer);
-                        RemoveWater(gB, idxB, flow);
-                        AddWaterSpread(gA, idxA, flow);
+                        float maxAccept = (gA.RoomHeight - gA.H[idxA]) * cellArea;
+                        flow = Math.Min(flow, Math.Min(maxTransfer, maxAccept));
+                        if (flow > 1e-6f)
+                        {
+                            RemoveWater(gB, idxB, flow);
+                            AddWaterSpread(gA, idxA, flow);
+                        }
                     }
                 }
             }
@@ -329,10 +346,17 @@ namespace SFP.Simulation
 
                 float waterY = g.FloorY + g.H[idx];
                 float seaY = _graph.SeaLevelY;
-                float dh = seaY - Math.Max(waterY, src.BreachY);
-                if (dh <= 0f) continue;
+                var comp = _graph.GetCompartment(g.Id);
+                float airHead = (comp.AirPressureAtm - 1f) * AirPressureMath.MetersPerAtm;
+                float dh = seaY - Math.Max(waterY, src.BreachY) - airHead;
+                if (dh <= 0f)
+                {
+                    src.Opening.FlowQ = 0f;
+                    src.Opening.FlowVelocity = 0f;
+                    continue;
+                }
 
-                float area = src.Opening.Area;
+                float area = src.Opening.EffectiveArea;
                 float q = cd * area * (float)Math.Sqrt(2f * gravity * dh);
                 float volume = q * dt;
 
@@ -417,17 +441,38 @@ namespace SFP.Simulation
                 var gA = _grids[conn.GridA];
                 var gB = _grids[conn.GridB];
 
+                var compA = _graph.GetCompartment(gA.Id);
+                var compB = _graph.GetCompartment(gB.Id);
+                float offA = (compA.AirPressureAtm - 1f) * AirPressureMath.MetersPerAtm;
+                float offB = (compB.AirPressureAtm - 1f) * AirPressureMath.MetersPerAtm;
+
                 for (int i = 0; i < conn.CellsA.Length; i++)
                 {
                     int idxA = conn.CellsA[i];
                     int idxB = conn.CellsB[i];
 
-                    float absA = gA.FloorY + gA.H[idxA];
-                    float absB = gB.FloorY + gB.H[idxB];
+                    float rawA = gA.FloorY + gA.H[idxA];
+                    float rawB = gB.FloorY + gB.H[idxB];
+                    if (rawA <= conn.SillY && rawB <= conn.SillY) continue;
+
+                    float absA = rawA + offA;
+                    float absB = rawB + offB;
                     float avg = (absA + absB) * 0.5f;
 
-                    gA.H[idxA] = Math.Max(0f, avg - gA.FloorY);
-                    gB.H[idxB] = Math.Max(0f, avg - gB.FloorY);
+                    float newHA = Math.Clamp(avg - offA - gA.FloorY, 0f, gA.RoomHeight);
+                    float newHB = Math.Clamp(avg - offB - gB.FloorY, 0f, gB.RoomHeight);
+
+                    float totalBefore = gA.H[idxA] + gB.H[idxB];
+                    float totalAfter = newHA + newHB;
+                    if (totalAfter > 1e-6f && Math.Abs(totalAfter - totalBefore) > 1e-6f)
+                    {
+                        float scale = totalBefore / totalAfter;
+                        newHA *= scale;
+                        newHB *= scale;
+                    }
+
+                    gA.H[idxA] = newHA;
+                    gB.H[idxB] = newHB;
                 }
             }
         }
@@ -476,7 +521,7 @@ namespace SFP.Simulation
                 }
 
                 float avgDiff = conn.CellsA.Length > 0 ? totalFlow / conn.CellsA.Length : 0f;
-                float area = conn.Opening.Area;
+                float area = conn.Opening.EffectiveArea;
                 float q = avgDiff * area * 2f;
 
                 conn.Opening.FlowQ = q;

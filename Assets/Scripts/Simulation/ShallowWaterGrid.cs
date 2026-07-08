@@ -268,5 +268,38 @@ namespace SFP.Simulation
                 }
             }
         }
+
+        public void SampleFlow(float worldX, float worldZ, out float velX, out float velZ, out float waterHeight)
+        {
+            float gx = (worldX - OriginX) / CellSize - 0.5f;
+            float gz = (worldZ - OriginZ) / CellSize - 0.5f;
+
+            gx = Math.Clamp(gx, 0f, ResX - 1);
+            gz = Math.Clamp(gz, 0f, ResZ - 1);
+
+            int x0 = (int)Math.Floor(gx);
+            int z0 = (int)Math.Floor(gz);
+            int x1 = Math.Min(x0 + 1, ResX - 1);
+            int z1 = Math.Min(z0 + 1, ResZ - 1);
+
+            float tx = gx - x0;
+            float tz = gz - z0;
+
+            int i00 = Idx(x0, z0);
+            int i10 = Idx(x1, z0);
+            int i01 = Idx(x0, z1);
+            int i11 = Idx(x1, z1);
+
+            velX = Bilerp(VelX[i00], VelX[i10], VelX[i01], VelX[i11], tx, tz);
+            velZ = Bilerp(VelZ[i00], VelZ[i10], VelZ[i01], VelZ[i11], tx, tz);
+            waterHeight = Bilerp(H[i00], H[i10], H[i01], H[i11], tx, tz);
+        }
+
+        static float Bilerp(float v00, float v10, float v01, float v11, float tx, float tz)
+        {
+            float a = v00 + (v10 - v00) * tx;
+            float b = v01 + (v11 - v01) * tx;
+            return a + (b - a) * tz;
+        }
     }
 }

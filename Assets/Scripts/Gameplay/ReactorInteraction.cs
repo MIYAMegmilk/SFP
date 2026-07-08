@@ -35,6 +35,7 @@ namespace SFP.Gameplay
 
             _activeReactor = reactor;
             _isControlling = true;
+            ConsoleFocus.Acquire(this);
         }
 
         void UpdateControl(Keyboard kb)
@@ -43,6 +44,7 @@ namespace SFP.Gameplay
             {
                 _isControlling = false;
                 _activeReactor = null;
+                ConsoleFocus.Release(this);
                 return;
             }
 

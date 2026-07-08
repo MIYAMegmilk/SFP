@@ -15,20 +15,29 @@ namespace SFP.Gameplay
             if (kb == null || mouse == null) return;
             if (!kb.fKey.wasPressedThisFrame) return;
 
-            var ray = Camera.main.ScreenPointToRay(mouse.position.ReadValue());
-            if (!Physics.Raycast(ray, out var hit, MaxDistance)) return;
+            var cam = Camera.main;
+            if (cam == null) return;
+            bool cursorLocked = Cursor.lockState == CursorLockMode.Locked;
+            var ray = cursorLocked
+                ? new Ray(cam.transform.position, cam.transform.forward)
+                : cam.ScreenPointToRay(mouse.position.ReadValue());
+            if (!Physics.Raycast(ray, out var hit, MaxDistance, ~0, QueryTriggerInteraction.Collide)) return;
 
             var openingDef = hit.collider.GetComponentInParent<OpeningDefinition>();
             if (openingDef == null) return;
             if (openingDef.Kind == SFP.Simulation.OpeningKind.Breach) return;
 
             var bridge = SimulationBridge.Instance;
-            if (bridge == null) return;
-            if (openingDef.SimIndex < 0) return;
-
-            var opening = bridge.Graph.Openings[openingDef.SimIndex];
-            opening.IsOpen = !opening.IsOpen;
-            openingDef.IsOpen = opening.IsOpen;
+            if (openingDef.SimIndex >= 0 && bridge != null)
+            {
+                var opening = bridge.Graph.Openings[openingDef.SimIndex];
+                opening.IsOpen = !opening.IsOpen;
+                openingDef.IsOpen = opening.IsOpen;
+            }
+            else
+            {
+                openingDef.IsOpen = !openingDef.IsOpen;
+            }
         }
     }
 }

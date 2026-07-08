@@ -14,6 +14,11 @@ namespace SFP.Gameplay
             var flyCam = FindFirstObjectByType<FlyCamera>();
             if (player == null || flyCam == null) return;
 
+            // Tab doubles as the in-console toggle key (autopilot / sonar mode).
+            // While one of those UIs is open it owns Tab; don't hijack it for the camera.
+            if (player.TryGetComponent<SteeringInteraction>(out var steering) && steering.IsSteering) return;
+            if (player.TryGetComponent<SonarInteraction>(out var sonarUi) && sonarUi.IsUsing) return;
+
             var playerCam = player.GetComponentInChildren<Camera>();
             var specCam = flyCam.GetComponent<Camera>();
             if (playerCam == null || specCam == null) return;
@@ -33,6 +38,10 @@ namespace SFP.Gameplay
 
             if (switchToSpec)
             {
+                flyCam.transform.SetPositionAndRotation(
+                    playerCam.transform.position,
+                    playerCam.transform.rotation);
+                flyCam.ResetRotation();
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
             }
@@ -45,6 +54,7 @@ namespace SFP.Gameplay
 
         static void SetToolsActive(GameObject go, bool active)
         {
+            if (go.TryGetComponent<BuildTool>(out var blt)) blt.enabled = active;
             if (go.TryGetComponent<BreachTool>(out var bt)) bt.enabled = active;
             if (go.TryGetComponent<DoorInteraction>(out var di)) di.enabled = active;
             if (go.TryGetComponent<RepairTool>(out var rt)) rt.enabled = active;

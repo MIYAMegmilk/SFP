@@ -9,8 +9,22 @@ namespace SFP.Simulation
         public float Volume;
         public float WaterVolume;
 
+        public float AirAmount;
+        public float AirPressureAtm = 1f;
+        public bool IsAirSealed;
+
         public float WaterFraction => Volume > 0f ? WaterVolume / Volume : 0f;
         public float WaterLevelY => FloorY + WaterFraction * Height;
+
+        public float AirVolume
+        {
+            get
+            {
+                float v = Volume - WaterVolume;
+                float floor = Volume * AirPressureMath.MinAirFraction;
+                return v > floor ? v : floor;
+            }
+        }
 
         public Compartment(int id, float floorY, float height, float floorArea)
         {
@@ -19,6 +33,7 @@ namespace SFP.Simulation
             Height = height;
             FloorArea = floorArea;
             Volume = height * floorArea;
+            AirAmount = Volume;
         }
     }
 }

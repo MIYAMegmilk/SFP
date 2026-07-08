@@ -7,7 +7,9 @@ namespace SFP.Gameplay
     public class PumpPlacer : MonoBehaviour
     {
         public float MaxDistance = 50f;
-        public float PumpRate = 0.5f;
+        // m³/s. Portable emergency pump: drains a flooded 216 m³ room in ~2.5 min at 200 m
+        // (after depth derating) — twice the fixed bilge pumps.
+        public float PumpRate = 2f;
 
         static Material s_pumpMat;
 
@@ -25,13 +27,21 @@ namespace SFP.Gameplay
             var compDef = hit.collider.GetComponentInParent<CompartmentDefinition>();
             if (compDef == null) return;
 
-            PlacePump(compDef, hit.point);
+            var bridge = SimulationBridge.Instance;
+            if (bridge == null) return;
+
+            PlacePump(bridge, compDef, hit.point);
         }
 
-        void PlacePump(CompartmentDefinition compDef, Vector3 worldPos)
+        void PlacePump(SimulationBridge bridge, CompartmentDefinition compDef, Vector3 worldHitPos)
         {
+            // FloorY is a ship-local absolute height; convert the world hit point to ship-local
+            // before combining it with FloorY, and parent under ShipRoot so the pump rides with the ship.
+            Vector3 localHit = bridge.WorldToShip(worldHitPos);
+
             var go = new GameObject("PlacedPump");
-            go.transform.position = new Vector3(worldPos.x, compDef.FloorY + 0.25f, worldPos.z);
+            go.transform.SetParent(bridge.ShipRoot, false);
+            go.transform.localPosition = new Vector3(localHit.x, compDef.FloorY + 0.25f, localHit.z);
 
             var pump = go.AddComponent<Pump>();
             pump.TargetCompartment = compDef;

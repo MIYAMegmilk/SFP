@@ -13,6 +13,11 @@ namespace SFP.Gameplay
 
         void Start()
         {
+            ResetRotation();
+        }
+
+        public void ResetRotation()
+        {
             _rotX = transform.eulerAngles.y;
             _rotY = -transform.eulerAngles.x;
         }

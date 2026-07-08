@@ -40,7 +40,54 @@ namespace SFP.Simulation
             }
         }
 
-        public void Tick(float dt, AtmosphereSystem atmosphere)
+        public float GetHeatDamageRate(int compartmentId)
+        {
+            float intensity = GetFireIntensity(compartmentId);
+            return intensity > 0.2f ? intensity * 3f : 0f;
+        }
+
+        public void TickDeviceDamage(float dt, PowerGrid power)
+        {
+            if (power == null) return;
+
+            foreach (var kvp in _fireIntensity)
+            {
+                int id = kvp.Key;
+                float intensity = kvp.Value;
+                if (intensity <= 0.3f) continue;
+
+                float damage = intensity * 2f * dt;
+
+                for (int i = 0; i < power.Reactors.Count; i++)
+                {
+                    var reactor = power.Reactors[i];
+                    if (reactor.CompartmentId != id) continue;
+                    reactor.Condition -= damage;
+                    if (reactor.Condition < 0f) reactor.Condition = 0f;
+                }
+
+                for (int i = 0; i < power.Junctions.Count; i++)
+                {
+                    var junction = power.Junctions[i];
+                    if (junction.CompartmentId != id) continue;
+                    junction.Condition -= damage;
+                    if (junction.Condition < 0f) junction.Condition = 0f;
+                }
+
+                if (intensity > 0.5f)
+                {
+                    for (int i = 0; i < power.Batteries.Count; i++)
+                    {
+                        var battery = power.Batteries[i];
+                        if (battery.CompartmentId != id) continue;
+                        var node = power.GetNode(battery.PowerNodeId);
+                        if (node != null) node.IsEnabled = false;
+                    }
+                }
+            }
+        }
+
+        public void Tick(float dt, AtmosphereSystem atmosphere, PowerGrid power = null)
         {
             var ids = new List<int>(_fireIntensity.Keys);
 
@@ -82,6 +129,9 @@ namespace SFP.Simulation
                 if (b > 0.3f && a < b)
                     _fireIntensity[o.CompartmentA] = a + (b - a) * _spreadRate * dt;
             }
+
+            if (power != null)
+                TickDeviceDamage(dt, power);
         }
     }
 }

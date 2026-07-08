@@ -18,7 +18,10 @@ namespace SFP.Gameplay
             if (_isViewing)
             {
                 if (kb.escapeKey.wasPressedThisFrame || kb.eKey.wasPressedThisFrame)
+                {
                     _isViewing = false;
+                    ConsoleFocus.Release(this);
+                }
                 return;
             }
 
@@ -31,6 +34,7 @@ namespace SFP.Gameplay
 
             if (hit.collider.GetComponentInParent<StatusMonitorDefinition>() == null) return;
             _isViewing = true;
+            ConsoleFocus.Acquire(this);
         }
 
         void OnGUI()

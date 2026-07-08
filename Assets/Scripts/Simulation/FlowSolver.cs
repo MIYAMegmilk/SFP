@@ -35,7 +35,7 @@ namespace SFP.Simulation
                     float waterVolB = GetWaterVolume(graph, o.CompartmentB);
                     if (waterVolA > 0.001f || waterVolB > 0.001f)
                     {
-                        effectiveArea = o.Area * 0.6f;
+                        effectiveArea = o.EffectiveArea * 0.6f;
                         if (Math.Abs(deltaH) < 0.05f)
                             deltaH = waterVolA > waterVolB ? 0.2f : -0.2f;
                     }
@@ -84,10 +84,10 @@ namespace SFP.Simulation
             float openingTop = o.CenterY + o.Height * 0.5f;
 
             if (higherWater <= openingBottom) return 0f;
-            if (higherWater >= openingTop) return o.Area;
+            if (higherWater >= openingTop) return o.EffectiveArea;
 
             float submergedFraction = (higherWater - openingBottom) / o.Height;
-            return o.Area * submergedFraction;
+            return o.EffectiveArea * submergedFraction;
         }
 
         float ClampTransfer(CompartmentGraph graph, int fromId, int toId, float transfer)

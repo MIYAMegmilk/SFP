@@ -7,22 +7,18 @@ namespace SFP.Presentation
     public class BreachVisual : MonoBehaviour
     {
         Opening _opening;
-        readonly List<WallInfo> _walls = new();
         readonly List<GameObject> _managed = new();
         float _lastArea = -1f;
 
         static Material _edgeMat;
+        static Material _holeMat;
 
-        struct WallInfo
-        {
-            public GameObject Original;
-            public Vector3 Pos;
-            public Quaternion Rot;
-            public Vector3 Scale;
-            public Vector3 LocalHit;
-            public int Thin, AxA, AxB;
-            public Material Mat;
-        }
+        // Stored in this transform's local space (aligned with the wall face via
+        // LookRotation(hit.normal)) so Rebuild positions survive ship movement/rotation.
+        Bounds _wallBoundsLocal;
+        int _thin, _axA, _axB;
+        Vector3 _hitLocal;
+        bool _valid;
 
         public void Init(Opening opening, RaycastHit hit)
         {
@@ -35,65 +31,47 @@ namespace SFP.Presentation
                 _edgeMat.SetFloat("_Metallic", 0.7f);
             }
 
-            // Find ALL overlapping walls at the hit position
-            var hitWall = hit.collider.gameObject;
-            var wallT = hitWall.transform;
-            var center = wallT.position;
-            var halfExt = wallT.lossyScale * 0.5f + Vector3.one * 0.05f;
-
-            var overlaps = Physics.OverlapBox(center, halfExt, wallT.rotation);
-            foreach (var col in overlaps)
+            if (_holeMat == null)
             {
-                var go = col.gameObject;
-                if (go == hitWall || IsWallAtSamePosition(go, hitWall))
-                {
-                    var info = BuildWallInfo(go, hit.point);
-                    _walls.Add(info);
-
-                    go.GetComponent<MeshRenderer>().enabled = false;
-                    col.enabled = false;
-                }
+                _holeMat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                _holeMat.color = new Color(0.03f, 0.03f, 0.04f);
+                _holeMat.SetFloat("_Metallic", 0f);
+                _holeMat.SetFloat("_Smoothness", 0.2f);
             }
 
-            // If somehow only hit wall was found (OverlapBox missed it because we disabled it)
-            if (_walls.Count == 0)
+            var bounds = hit.collider.bounds;
+
+            _hitLocal = transform.InverseTransformPoint(hit.point);
+            Vector3 wMin = bounds.min, wMax = bounds.max;
+            Vector3 lMin = Vector3.one * float.MaxValue;
+            Vector3 lMax = Vector3.one * float.MinValue;
+            for (int i = 0; i < 8; i++)
             {
-                var info = BuildWallInfo(hitWall, hit.point);
-                _walls.Add(info);
-                hitWall.GetComponent<MeshRenderer>().enabled = false;
-                var c = hitWall.GetComponent<Collider>();
-                if (c) c.enabled = false;
+                Vector3 corner = new Vector3(
+                    (i & 1) != 0 ? wMax.x : wMin.x,
+                    (i & 2) != 0 ? wMax.y : wMin.y,
+                    (i & 4) != 0 ? wMax.z : wMin.z);
+                Vector3 lc = transform.InverseTransformPoint(corner);
+                lMin = Vector3.Min(lMin, lc);
+                lMax = Vector3.Max(lMax, lc);
             }
+            _wallBoundsLocal = new Bounds((lMin + lMax) * 0.5f, lMax - lMin);
+
+            _thin = 0;
+            if (_wallBoundsLocal.size.y < _wallBoundsLocal.size[_thin]) _thin = 1;
+            if (_wallBoundsLocal.size.z < _wallBoundsLocal.size[_thin]) _thin = 2;
+
+            if (_wallBoundsLocal.size[_thin] >= 0.8f)
+            {
+                _valid = false;
+                return;
+            }
+
+            _axA = (_thin + 1) % 3;
+            _axB = (_thin + 2) % 3;
+            _valid = true;
 
             Rebuild();
-        }
-
-        bool IsWallAtSamePosition(GameObject a, GameObject b)
-        {
-            float dist = Vector3.Distance(a.transform.position, b.transform.position);
-            return dist < 0.15f;
-        }
-
-        WallInfo BuildWallInfo(GameObject wall, Vector3 hitWorld)
-        {
-            var wt = wall.transform;
-            var scale = wt.lossyScale;
-            int thin = 0;
-            if (scale.y < scale[thin]) thin = 1;
-            if (scale.z < scale[thin]) thin = 2;
-
-            return new WallInfo
-            {
-                Original = wall,
-                Pos = wt.position,
-                Rot = wt.rotation,
-                Scale = scale,
-                LocalHit = wt.InverseTransformPoint(hitWorld),
-                Thin = thin,
-                AxA = (thin + 1) % 3,
-                AxB = (thin + 2) % 3,
-                Mat = wall.GetComponent<MeshRenderer>().sharedMaterial
-            };
         }
 
         void Update()
@@ -114,17 +92,6 @@ namespace SFP.Presentation
                 _opening.Area = 0f;
                 _opening.FlowQ = 0f;
                 _opening.FlowVelocity = 0f;
-            }
-
-            foreach (var w in _walls)
-            {
-                if (w.Original != null)
-                {
-                    var mr = w.Original.GetComponent<MeshRenderer>();
-                    if (mr != null) mr.enabled = true;
-                    var col = w.Original.GetComponent<Collider>();
-                    if (col != null) col.enabled = true;
-                }
             }
 
             foreach (var go in _managed)
@@ -152,82 +119,69 @@ namespace SFP.Presentation
             foreach (var go in _managed)
                 if (go) Destroy(go);
             _managed.Clear();
-            _lastArea = _opening != null ? _opening.Area : 0.3f;
 
-            foreach (var w in _walls)
-                RebuildWall(w);
-        }
-
-        void RebuildWall(WallInfo w)
-        {
-            float holeSide = Mathf.Sqrt(_lastArea);
-            float hHalfA = (holeSide * 0.5f) / w.Scale[w.AxA];
-            float hHalfB = (holeSide * 0.5f) / w.Scale[w.AxB];
-
-            float hitA = w.LocalHit[w.AxA];
-            float hitB = w.LocalHit[w.AxB];
-
-            float minA = Mathf.Max(hitA - hHalfA, -0.5f);
-            float maxA = Mathf.Min(hitA + hHalfA,  0.5f);
-            float minB = Mathf.Max(hitB - hHalfB, -0.5f);
-            float maxB = Mathf.Min(hitB + hHalfB,  0.5f);
-
-            // 4 wall segments around the hole
-            Seg(w, -0.5f, 0.5f, maxB, 0.5f);   // top
-            Seg(w, -0.5f, 0.5f, -0.5f, minB);  // bottom
-            Seg(w, -0.5f, minA, minB, maxB);    // left
-            Seg(w, maxA,  0.5f, minB, maxB);    // right
-
-            // Edge frame (only on the first wall to avoid doubling)
-            if (_walls.Count == 0 || _walls[0].Original == w.Original)
+            if (!_valid || _opening == null)
             {
-                float e = 0.05f / Mathf.Max(w.Scale[w.AxA], w.Scale[w.AxB]);
-                Edge(w, minA - e, maxA + e, maxB - e, maxB + e);
-                Edge(w, minA - e, maxA + e, minB - e, minB + e);
-                Edge(w, minA - e, minA + e, minB, maxB);
-                Edge(w, maxA - e, maxA + e, minB, maxB);
+                _lastArea = _opening != null ? _opening.Area : 0f;
+                return;
             }
+
+            _lastArea = _opening.Area;
+            float holeSide = Mathf.Sqrt(Mathf.Max(_lastArea, 0.01f));
+            float half = holeSide * 0.5f;
+
+            float aMin = Mathf.Max(_hitLocal[_axA] - half, _wallBoundsLocal.min[_axA]);
+            float aMax = Mathf.Min(_hitLocal[_axA] + half, _wallBoundsLocal.max[_axA]);
+            float bMin = Mathf.Max(_hitLocal[_axB] - half, _wallBoundsLocal.min[_axB]);
+            float bMax = Mathf.Min(_hitLocal[_axB] + half, _wallBoundsLocal.max[_axB]);
+
+            var holeCenter = Vector3.zero;
+            holeCenter[_axA] = (aMin + aMax) * 0.5f;
+            holeCenter[_axB] = (bMin + bMax) * 0.5f;
+            holeCenter[_thin] = _wallBoundsLocal.center[_thin];
+
+            var holeScale = Vector3.one;
+            holeScale[_axA] = aMax - aMin;
+            holeScale[_axB] = bMax - bMin;
+            holeScale[_thin] = _wallBoundsLocal.size[_thin] * 1.15f;
+
+            MakeCube("BreachHole", holeCenter, holeScale, _holeMat);
+
+            float e = 0.05f;
+            float edgeThin = _wallBoundsLocal.size[_thin] * 1.25f;
+
+            MakeEdge(aMin - e, aMax + e, bMax - e, bMax + e, edgeThin);
+            MakeEdge(aMin - e, aMax + e, bMin - e, bMin + e, edgeThin);
+            MakeEdge(aMin - e, aMin + e, bMin, bMax, edgeThin);
+            MakeEdge(aMax - e, aMax + e, bMin, bMax, edgeThin);
         }
 
-        void Seg(WallInfo w, float aMin, float aMax, float bMin, float bMax)
+        void MakeEdge(float aMin, float aMax, float bMin, float bMax, float thinSize)
         {
-            if (aMax - aMin < 0.001f || bMax - bMin < 0.001f) return;
+            var center = Vector3.zero;
+            center[_axA] = (aMin + aMax) * 0.5f;
+            center[_axB] = (bMin + bMax) * 0.5f;
+            center[_thin] = _wallBoundsLocal.center[_thin];
 
-            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = "WallSeg";
-            go.isStatic = true;
-            go.GetComponent<MeshRenderer>().sharedMaterial = w.Mat;
-            PlaceCube(go, w, aMin, aMax, bMin, bMax, 1f);
-            _managed.Add(go);
+            var scale = Vector3.one;
+            scale[_axA] = aMax - aMin;
+            scale[_axB] = bMax - bMin;
+            scale[_thin] = thinSize;
+
+            MakeCube("HoleEdge", center, scale, _edgeMat);
         }
 
-        void Edge(WallInfo w, float aMin, float aMax, float bMin, float bMax)
+        void MakeCube(string name, Vector3 localCenter, Vector3 localScale, Material mat)
         {
-            if (aMax - aMin < 0.001f || bMax - bMin < 0.001f) return;
-
             var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = "HoleEdge";
+            go.name = name;
             Destroy(go.GetComponent<Collider>());
-            go.GetComponent<MeshRenderer>().sharedMaterial = _edgeMat;
-            PlaceCube(go, w, aMin, aMax, bMin, bMax, 1.3f);
+            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            go.transform.SetParent(transform);
+            go.transform.localPosition = localCenter;
+            go.transform.localScale = localScale;
+
             _managed.Add(go);
-        }
-
-        void PlaceCube(GameObject go, WallInfo w,
-            float aMin, float aMax, float bMin, float bMax, float thinMult)
-        {
-            var lc = Vector3.zero;
-            lc[w.AxA] = (aMin + aMax) * 0.5f;
-            lc[w.AxB] = (bMin + bMax) * 0.5f;
-
-            var ls = Vector3.one;
-            ls[w.Thin] = thinMult;
-            ls[w.AxA] = aMax - aMin;
-            ls[w.AxB] = bMax - bMin;
-
-            go.transform.position = w.Pos + w.Rot * Vector3.Scale(lc, w.Scale);
-            go.transform.rotation = w.Rot;
-            go.transform.localScale = Vector3.Scale(ls, w.Scale);
         }
     }
 }

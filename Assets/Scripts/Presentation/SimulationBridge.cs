@@ -12,12 +12,30 @@ namespace SFP.Presentation
 
         public float HullVolume = 1700f;
         public float SubmarineDryMass = 1742500f;
+        public float SeaFloorDepth = 600f;
+        public int MapSeed = 12345;
+
+        // Debug: devices never brown out (grid pinned at 100%). Toggleable live in the inspector.
+        public bool DebugUnlimitedPower;
+
+        // Assigned by FloodTestShipBuilder: the transform ShipRootDriver moves every frame to
+        // carry the whole interior (Hull + Player + ladders + devices) through the ocean world.
+        // THE INVARIANT: simulation space == ship-local space == the authored build coordinates
+        // (x 0..24, y 0..18, z 0..6). BuildGraph (Awake) runs while this is still at identity, so
+        // any transform reads there are already ship-local; everything read at RUNTIME must be
+        // converted via WorldToShip/ShipToWorld before it is compared against or fed into sim state.
+        public Transform ShipRootRef;
+        public Transform ShipRoot => ShipRootRef;
+
+        public Vector3 WorldToShip(Vector3 worldPos) => ShipRootRef.InverseTransformPoint(worldPos);
+        public Vector3 ShipToWorld(Vector3 shipLocalPos) => ShipRootRef.TransformPoint(shipLocalPos);
 
         CompartmentGraph _graph;
         ShallowWaterSystem _waterSystem;
         SubmarineState _subState;
         PowerGrid _powerGrid;
         AtmosphereSystem _atmosphere;
+        DamageSystem _damageSystem;
         readonly System.Collections.Generic.List<OxygenGeneratorState> _oxygenGenerators = new();
         EngineState _engine;
         NavigationState _navigation;
@@ -31,6 +49,7 @@ namespace SFP.Presentation
         float _dt;
 
         readonly Dictionary<CompartmentDefinition, int> _defToId = new();
+        readonly Dictionary<int, CompartmentDefinition> _idToDef = new();
         readonly Dictionary<int, float> _prevWaterLevels = new();
         readonly Dictionary<int, float> _currWaterLevels = new();
 
@@ -39,6 +58,12 @@ namespace SFP.Presentation
         public SubmarineState SubState => _subState;
         public PowerGrid PowerGrid => _powerGrid;
         public AtmosphereSystem Atmosphere => _atmosphere;
+        public DamageSystem DamageSystem => _damageSystem;
+        public MapData Map { get; private set; }
+        public TerrainModel Terrain { get; private set; }
+        public MineSystem MineSystem { get; private set; }
+        public CreatureSystem Creatures { get; private set; }
+        public OceanCurrentField OceanCurrents { get; private set; }
         public FireSystem FireSystem => _fireSystem;
         public EngineState Engine => _engine;
         public NavigationState Navigation => _navigation;
@@ -71,6 +96,7 @@ namespace SFP.Presentation
             {
                 var c = _graph.AddCompartment(def.FloorY, def.Height, def.FloorArea);
                 _defToId[def] = c.Id;
+                _idToDef[c.Id] = def;
 
                 float originX = def.transform.position.x - def.LengthX * 0.5f;
                 float originZ = def.transform.position.z - def.WidthZ * 0.5f;
@@ -182,10 +208,11 @@ namespace SFP.Presentation
                 var bs = new BallastTankState
                 {
                     PowerNodeId = bNode.Id,
-                    CompartmentId = btd.BallastCompartment != null
-                        ? GetCompartmentId(btd.BallastCompartment) : -1,
+                    Capacity = btd.Capacity,
                     PumpRate = btd.PumpRate,
                     PowerConsumption = btd.PowerConsumption,
+                    CurrentFillLevel = btd.InitialFillLevel,
+                    TargetFillLevel = btd.InitialFillLevel,
                 };
                 ballastList.Add(bs);
                 btd.BallastIndex = i;
@@ -228,7 +255,58 @@ namespace SFP.Presentation
                 fd.FabricatorIndex = i;
             }
 
+            Map = MapGenerator.Generate(MapSeed);
+            Terrain = new TerrainModel { SeaFloorDepth = SeaFloorDepth, Map = Map };
+            _subState.PositionX = Map.SpawnX;
+            _subState.PositionZ = Map.SpawnZ;
+
+            MineSystem = new MineSystem();
+            foreach (var spot in Map.MineSpots)
+                MineSystem.AddMine(spot.X, spot.Z, spot.Depth);
+
+            Creatures = new CreatureSystem(MapSeed, Map);
+            OceanCurrents = new OceanCurrentField(MapSeed, Map.WorldSizeX);
+
+            _damageSystem = new DamageSystem(_graph, _subState);
+            _damageSystem.Terrain = Terrain;
+            if (_engine != null) _damageSystem.Engine = _engine;
+
+            // Register 6 hull faces per compartment
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minZ = float.MaxValue, maxZ = float.MinValue;
+            float minFloorY = float.MaxValue, maxCeilY = float.MinValue;
+            foreach (var def in compartmentDefs)
+            {
+                float cx = def.transform.position.x;
+                float cz = def.transform.position.z;
+                float hx = def.LengthX * 0.5f;
+                float hz = def.WidthZ * 0.5f;
+                if (cx - hx < minX) minX = cx - hx;
+                if (cx + hx > maxX) maxX = cx + hx;
+                if (cz - hz < minZ) minZ = cz - hz;
+                if (cz + hz > maxZ) maxZ = cz + hz;
+                if (def.FloorY < minFloorY) minFloorY = def.FloorY;
+                float ceil = def.FloorY + def.Height;
+                if (ceil > maxCeilY) maxCeilY = ceil;
+            }
+            foreach (var def in compartmentDefs)
+            {
+                int cid = _defToId[def];
+                float cx = def.transform.position.x;
+                float cz = def.transform.position.z;
+                float hx = def.LengthX * 0.5f;
+                float hz = def.WidthZ * 0.5f;
+                float ceil = def.FloorY + def.Height;
+                _damageSystem.RegisterHullSection(cid, HullFace.East,    Mathf.Abs(cx + hx - maxX) < 0.1f);
+                _damageSystem.RegisterHullSection(cid, HullFace.West,    Mathf.Abs(cx - hx - minX) < 0.1f);
+                _damageSystem.RegisterHullSection(cid, HullFace.North,   Mathf.Abs(cz + hz - maxZ) < 0.1f);
+                _damageSystem.RegisterHullSection(cid, HullFace.South,   Mathf.Abs(cz - hz - minZ) < 0.1f);
+                _damageSystem.RegisterHullSection(cid, HullFace.Floor,   Mathf.Abs(def.FloorY - minFloorY) < 0.1f);
+                _damageSystem.RegisterHullSection(cid, HullFace.Ceiling, Mathf.Abs(ceil - maxCeilY) < 0.1f);
+            }
+
             _fireSystem = new FireSystem(_graph);
+            _damageSystem.Fire = _fireSystem;
 
             var turretDefs = FindObjectsByType<TurretDefinition>(FindObjectsSortMode.None);
             for (int i = 0; i < turretDefs.Length; i++)
@@ -275,20 +353,37 @@ namespace SFP.Presentation
                     _prevWaterLevels[c.Id] = c.WaterLevelY;
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
+                _powerGrid.UnlimitedPower = DebugUnlimitedPower;
                 _powerGrid.Tick(_dt);
+                _damageSystem.Tick(_dt, _fireSystem, _powerGrid);
+                MineSystem.Tick(_dt, _subState, _damageSystem);
+                bool activeSonarPinging = false;
+                for (int i = 0; i < _sonars.Count; i++)
+                {
+                    var s = _sonars[i];
+                    if (s.IsActive && !s.IsPassive && s.HasPower) activeSonarPinging = true;
+                }
+                Creatures?.Tick(_dt, _subState, _damageSystem, Terrain, activeSonarPinging, OceanCurrents);
                 _waterSystem.Tick(_dt);
                 _engine?.Tick(_dt, _powerGrid);
+                float ballastWater = 0f;
                 for (int i = 0; i < _ballasts.Length; i++)
-                    _ballasts[i].Tick(_dt, _graph, _powerGrid);
+                {
+                    _ballasts[i].Tick(_dt, _powerGrid);
+                    ballastWater += _ballasts[i].WaterVolume;
+                }
+                _subState.ExternalBallastVolume = ballastWater;
                 _navigation?.Tick(_dt, _subState, _engine, _ballasts);
                 float thrust = _engine?.CurrentThrust ?? 0f;
-                float rudder = 0f;
-                _subState.Tick(_dt, _graph, thrust, rudder);
+                float curX = 0f, curZ = 0f;
+                OceanCurrents?.Sample(_subState.PositionX, _subState.PositionZ, _subState.Depth,
+                    out curX, out curZ);
+                _subState.Tick(_dt, _graph, thrust, curX, curZ);
                 _atmosphere.Tick(_dt);
                 for (int i = 0; i < _oxygenGenerators.Count; i++)
                     _oxygenGenerators[i].Tick(_dt, _atmosphere, _powerGrid);
                 for (int i = 0; i < _sonars.Count; i++)
-                    _sonars[i].Tick(_dt, _powerGrid, _subState);
+                    _sonars[i].Tick(_dt, _powerGrid, _subState, Terrain, MineSystem, Creatures);
                 for (int i = 0; i < _fabricators.Count; i++)
                     _fabricators[i].Tick(_dt, _powerGrid);
                 if (_fireSystem != null)
@@ -299,7 +394,7 @@ namespace SFP.Presentation
                         if (j.FireTriggered && j.CompartmentId >= 0)
                             _fireSystem.StartFire(j.CompartmentId, 0.1f);
                     }
-                    _fireSystem.Tick(_dt, _atmosphere);
+                    _fireSystem.Tick(_dt, _atmosphere, _powerGrid);
                 }
                 for (int i = 0; i < _turrets.Count; i++)
                     _turrets[i].Tick(_dt, _powerGrid);
@@ -323,6 +418,11 @@ namespace SFP.Presentation
         public int GetCompartmentId(CompartmentDefinition def)
         {
             return _defToId.TryGetValue(def, out int id) ? id : -1;
+        }
+
+        public CompartmentDefinition GetCompartmentDef(int id)
+        {
+            return _idToDef.TryGetValue(id, out var def) ? def : null;
         }
 
         public OxygenGeneratorState GetOxygenGenerator(int index)
@@ -353,21 +453,55 @@ namespace SFP.Presentation
         public Opening AddBreachAtRuntime(CompartmentDefinition target, float area,
             float centerY, float height)
         {
+            // target.transform.position is WORLD space at RUNTIME (compartments are rigid
+            // children of the moving ShipRoot); convert back to ship-local before delegating,
+            // since the water grid is authored in ship-local space (see THE INVARIANT above).
+            Vector3 shipLocal = WorldToShip(target.transform.position);
             return AddBreachAtRuntime(target, area, centerY, height,
-                target.transform.position.x, target.transform.position.z);
+                shipLocal.x, shipLocal.z);
         }
 
+        // localX/localZ are SHIP-LOCAL coordinates (see THE INVARIANT above), matching the
+        // domain of the water grid. Callers (e.g. BreachTool) must convert world-space hit
+        // points via WorldToShip before calling this overload; nothing is converted here.
         public Opening AddBreachAtRuntime(CompartmentDefinition target, float area,
-            float centerY, float height, float worldX, float worldZ)
+            float centerY, float height, float localX, float localZ)
         {
             int id = GetCompartmentId(target);
             if (id < 0) return null;
             var opening = _graph.AddOpening(OpeningKind.Breach, Opening.Sea, id,
                 area, centerY, height);
 
-            _waterSystem.AddBreachSource(opening, id, worldX, worldZ, centerY);
+            _waterSystem.AddBreachSource(opening, id, localX, localZ, centerY);
 
             return opening;
+        }
+
+        public Opening RegisterOpeningAtRuntime(OpeningDefinition def)
+        {
+            int idA = def.CompartmentA != null ? GetCompartmentId(def.CompartmentA) : Opening.Sea;
+            int idB = def.CompartmentB != null ? GetCompartmentId(def.CompartmentB) : Opening.Sea;
+            if (idA == Opening.Sea || idB == Opening.Sea) return null;
+
+            // def.transform.position is WORLD space at RUNTIME (openings built via
+            // BuiltStructureManager live under the moving ShipRoot); convert to ship-local
+            // before feeding the sim/water grid, which are authored in ship-local space.
+            Vector3 shipLocal = WorldToShip(def.transform.position);
+
+            var o = _graph.AddOpening(def.Kind, idA, idB, def.Area,
+                shipLocal.y, def.Height, def.IsOpen);
+            def.SimIndex = o.Id;
+
+            bool isVertical = def.Kind == OpeningKind.Hatch;
+            float sillY = shipLocal.y - def.Height * 0.5f;
+            float openingWidth = isVertical
+                ? Mathf.Sqrt(def.Area)
+                : def.Area / def.Height;
+
+            _waterSystem.AddConnection(o, idA, idB,
+                shipLocal.x, shipLocal.z,
+                openingWidth, sillY, isVertical);
+            return o;
         }
     }
 }

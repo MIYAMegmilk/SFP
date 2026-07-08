@@ -7,7 +7,8 @@ namespace SFP.Gameplay
     public class Pump : MonoBehaviour
     {
         public CompartmentDefinition TargetCompartment;
-        public float PumpRate = 0.1f;
+        // m³/s. Fixed bilge pump in each compartment (portable pumps are 2×).
+        public float PumpRate = 1f;
         public bool IsActive = true;
         public float MaxPumpDepth = 800f;
         public float PowerConsumption = 50f;

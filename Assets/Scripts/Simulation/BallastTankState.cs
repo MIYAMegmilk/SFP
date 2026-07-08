@@ -1,25 +1,27 @@
 namespace SFP.Simulation
 {
+    // External main ballast tank (saddle tank outside the pressure hull). Its water adds to
+    // the boat's mass via SubmarineState.ExternalBallastVolume but never enters the
+    // compartment graph — interior flooding stays a damage-control problem only.
     public sealed class BallastTankState
     {
         public int PowerNodeId = -1;
-        public int CompartmentId = -1;
-        public float TargetFillLevel;
-        public float PumpRate = 0.3f;
+        // One-compartment standard: full blow from neutral (50%) must exceed the largest
+        // compartment (216 m³), so 2 tanks × 240 m³ × 0.5 = 240 m³ of reserve buoyancy.
+        public float Capacity = 240f;
+        public float TargetFillLevel = 0.5f;
+        // Tank fraction per second. 0.1/s floods/vents a full tank in 10 s — an emergency
+        // MBT blow on a real boat completes in seconds to tens of seconds.
+        public float PumpRate = 0.1f;
         public float PowerConsumption = 40f;
+        public float CurrentFillLevel = 0.5f;
 
-        public float CurrentFillLevel { get; private set; }
+        public float WaterVolume => CurrentFillLevel * Capacity;
 
-        public void Tick(float dt, CompartmentGraph graph, PowerGrid power)
+        public void Tick(float dt, PowerGrid power)
         {
-            if (CompartmentId < 0) return;
-
-            var comp = graph.GetCompartment(CompartmentId);
-            if (comp == null) return;
-
-            CurrentFillLevel = comp.WaterFraction;
             float diff = TargetFillLevel - CurrentFillLevel;
-            if (System.Math.Abs(diff) < 0.005f) return;
+            if (System.Math.Abs(diff) < 0.001f) return;
 
             float powerEff = 1f;
             if (PowerNodeId >= 0 && power != null)
@@ -29,21 +31,11 @@ namespace SFP.Simulation
                 powerEff = power.GridVoltage > 1f ? 1f : power.GridVoltage;
             }
 
-            float pumpAmount = PumpRate * powerEff * dt;
-
+            float step = PumpRate * powerEff * dt;
             if (diff > 0f)
-            {
-                float toAdd = diff < pumpAmount ? diff * comp.Volume : pumpAmount;
-                comp.WaterVolume += toAdd;
-                if (comp.WaterVolume > comp.Volume)
-                    comp.WaterVolume = comp.Volume;
-            }
+                CurrentFillLevel = System.Math.Min(CurrentFillLevel + step, TargetFillLevel);
             else
-            {
-                float toRemove = -diff < pumpAmount ? -diff * comp.Volume : pumpAmount;
-                comp.WaterVolume -= toRemove;
-                if (comp.WaterVolume < 0f) comp.WaterVolume = 0f;
-            }
+                CurrentFillLevel = System.Math.Max(CurrentFillLevel - step, TargetFillLevel);
         }
     }
 }

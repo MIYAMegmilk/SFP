@@ -7,6 +7,7 @@ namespace SFP.Simulation
         public float MaxThrust = 50000f;
         public float ThrottleSetting;
         public float PowerConsumption = 200f;
+        public float Condition = 100f;
 
         public float CurrentThrust { get; private set; }
 
@@ -24,7 +25,7 @@ namespace SFP.Simulation
                 powerEff = power.GridVoltage > 1f ? 1f : power.GridVoltage;
             }
 
-            CurrentThrust = MaxThrust * ThrottleSetting * powerEff;
+            CurrentThrust = MaxThrust * ThrottleSetting * powerEff * (Condition * 0.01f);
         }
     }
 }

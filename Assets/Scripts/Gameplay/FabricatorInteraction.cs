@@ -25,6 +25,7 @@ namespace SFP.Gameplay
                 {
                     _isOpen = false;
                     _activeFab = null;
+                    ConsoleFocus.Release(this);
                 }
                 return;
             }
@@ -41,6 +42,7 @@ namespace SFP.Gameplay
 
             _activeFab = fab;
             _isOpen = true;
+            ConsoleFocus.Acquire(this);
             _selectedRecipe = 0;
         }
 

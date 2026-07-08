@@ -26,19 +26,26 @@ namespace SFP.Simulation
         public float CoolingRate = 5f;
         public float HeatRate = 8f;
 
+        public float Condition = 100f;
+        public float MeltdownProgress;
+        public float MeltdownFuseSeconds = 15f;
+        public bool HasExploded;
+
         public bool IsMeltingDown => Temperature >= MeltdownTemperature;
         public float CurrentPowerOutput { get; private set; }
         public float TemperatureEfficiency { get; private set; }
 
         public void Tick(float dt)
         {
-            if (FuelRemaining <= 0f)
+            if (HasExploded || FuelRemaining <= 0f)
             {
                 FissionRate = 0f;
                 FuelRemaining = 0f;
+                if (HasExploded) { CurrentPowerOutput = 0f; return; }
             }
 
-            float heatGeneration = FissionRate * 0.01f * HeatRate;
+            float effectiveHeatRate = HeatRate * (1f + (100f - Condition) * 0.005f);
+            float heatGeneration = FissionRate * 0.01f * effectiveHeatRate;
             float turbineCooling = TurbineOutput * 0.01f * CoolingRate;
             Temperature += (heatGeneration - turbineCooling) * dt;
             if (Temperature < 0f) Temperature = 0f;
@@ -49,7 +56,7 @@ namespace SFP.Simulation
             if (TemperatureEfficiency < 0f) TemperatureEfficiency = 0f;
             if (TemperatureEfficiency > 1f) TemperatureEfficiency = 1f;
 
-            CurrentPowerOutput = MaxPowerOutput * (TurbineOutput * 0.01f) * TemperatureEfficiency;
+            CurrentPowerOutput = MaxPowerOutput * (TurbineOutput * 0.01f) * TemperatureEfficiency * (Condition * 0.01f);
 
             FuelRemaining -= FissionRate * 0.01f * FuelConsumptionRate * dt;
         }
@@ -101,6 +108,7 @@ namespace SFP.Simulation
 
         public bool IsOverloaded => CurrentLoad > MaxLoad;
         public bool IsFunctional => Condition > 0f;
+        public bool IsShortedByWater;
 
         public bool FireTriggered { get; private set; }
 
@@ -131,6 +139,9 @@ namespace SFP.Simulation
         public float TotalProduction { get; private set; }
         public float TotalConsumption { get; private set; }
         public float GridVoltage { get; private set; } = 1f;
+
+        // Debug: pin the grid at nominal voltage so devices never brown out.
+        public bool UnlimitedPower;
 
         public PowerNode AddNode(float production, float consumption)
         {
@@ -211,11 +222,21 @@ namespace SFP.Simulation
             if (GridVoltage > 1.5f) GridVoltage = 1.5f;
 
             float loadPerJunction = _junctions.Count > 0 ? consumption / _junctions.Count : 0f;
+            float condSum = 0f;
             for (int i = 0; i < _junctions.Count; i++)
             {
                 _junctions[i].CurrentLoad = loadPerJunction;
                 _junctions[i].Tick(dt);
+                condSum += _junctions[i].Condition;
             }
+            if (_junctions.Count > 0)
+            {
+                float avgCond = condSum / (_junctions.Count * 100f);
+                GridVoltage *= 0.3f + 0.7f * avgCond;
+            }
+
+            if (UnlimitedPower)
+                GridVoltage = 1f;
 
             float minVoltage = 0.2f;
             for (int i = 0; i < _nodes.Count; i++)

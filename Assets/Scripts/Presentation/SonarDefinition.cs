@@ -6,6 +6,8 @@ namespace SFP.Presentation
     {
         public float ActiveRange = 500f;
         public float PowerConsumption = 100f;
+        // 1 = standalone 2D sonar, 2 = fused nav+sonar console, 3 = fused + 3D hologram.
+        public int Tier = 1;
         public CompartmentDefinition Compartment;
         [HideInInspector] public int SonarIndex = -1;
 

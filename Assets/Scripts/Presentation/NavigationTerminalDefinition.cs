@@ -4,6 +4,8 @@ namespace SFP.Presentation
 {
     public class NavigationTerminalDefinition : MonoBehaviour
     {
+        // 1 = standalone helm, 2/3 = fused nav+sonar console (see SonarDefinition.Tier).
+        public int Tier = 1;
         public CompartmentDefinition Compartment;
 
         void OnDrawGizmos()

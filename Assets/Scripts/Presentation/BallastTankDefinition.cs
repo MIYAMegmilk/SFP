@@ -4,9 +4,11 @@ namespace SFP.Presentation
 {
     public class BallastTankDefinition : MonoBehaviour
     {
-        public float PumpRate = 0.3f;
+        // External MBT parameters — see BallastTankState (fraction/s, m³).
+        public float PumpRate = 0.1f;
+        public float Capacity = 240f;
+        public float InitialFillLevel = 0.5f;
         public float PowerConsumption = 40f;
-        public CompartmentDefinition BallastCompartment;
         [HideInInspector] public int BallastIndex = -1;
 
         void OnDrawGizmos()

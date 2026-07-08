@@ -9,6 +9,7 @@ namespace SFP.Gameplay
         public float Condition = 100f;
         public float NormalDegradation = 0.01f;
         public float SubmergedDegradation = 0.5f;
+        public float FireDamageRate = 3f;
         public float RepairRate = 5f;
         public bool IsFunctional => Condition > 0f;
 
@@ -30,6 +31,8 @@ namespace SFP.Gameplay
             if (Condition > 0f)
             {
                 float rate = submerged ? SubmergedDegradation : NormalDegradation;
+                float fi = bridge.FireSystem?.GetFireIntensity(id) ?? 0f;
+                if (fi > 0f) rate += FireDamageRate * fi;
                 Condition = Mathf.Max(0f, Condition - rate * Time.deltaTime);
             }
 

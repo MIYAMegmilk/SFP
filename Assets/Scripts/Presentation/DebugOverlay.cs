@@ -63,6 +63,17 @@ namespace SFP.Presentation
                 }
             }
 
+            var dmg = bridge.DamageSystem;
+            if (dmg != null)
+            {
+                float hull = dmg.GetHullIntegrityFraction();
+                string dmgInfo = $"Hull: {hull * 100f:F0}% | Breaches: {dmg.BreachCount} ({dmg.PatchedBreachCount} patched)";
+                if (dmg.HullStress > 0.01f)
+                    dmgInfo += $" | Stress: {dmg.HullStress * 100f:F0}%";
+                GUI.Label(new Rect(x, y, 600, 20), dmgInfo, style);
+                y += 18f;
+            }
+
             GUI.Label(new Rect(x, y, 300, 20), $"Tick: {bridge.TickDt * 1000f:F1}ms interval | Last: {bridge.LastTickMs:F3}ms", style);
             y += 20f;
 
@@ -77,6 +88,8 @@ namespace SFP.Presentation
                 string extras = "";
                 if (o2 < 0.9f) extras += $" O2={o2 * 100f:F0}%";
                 if (fire > 0f) extras += $" FIRE={fire * 100f:F0}%";
+                if (Mathf.Abs(c.AirPressureAtm - 1f) > 0.02f)
+                    extras += $" P={c.AirPressureAtm:F2}atm{(c.IsAirSealed ? " SEALED" : "")}";
                 GUI.Label(new Rect(x, y, 600, 20),
                     $"C{c.Id}: {pct:F1}% ({c.WaterVolume:F2}/{c.Volume:F1}m³) Y={c.WaterLevelY:F2}m{extras}", style);
                 y += 18f;
