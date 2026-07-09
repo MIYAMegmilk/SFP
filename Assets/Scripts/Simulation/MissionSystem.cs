@@ -20,11 +20,9 @@ namespace SFP.Simulation
     {
         const float HoldPositionSeconds = 30f;
         const float DeepPointMinFloor = 400f;
-        const float DeepPointBorderMargin = 300f;
-        const int DeepPointMaxAttempts = 4000;
         const int WaypointsPerRound = 3;
 
-        readonly MapData _map;
+        readonly ProceduralMapData _map;
         readonly float _baseX, _baseZ;
         int _seed;
 
@@ -37,7 +35,7 @@ namespace SFP.Simulation
         public int CompletedCount => _currentIndex;
         public int TotalCount => _missions.Count;
 
-        public MissionSystem(int seed, MapData map)
+        public MissionSystem(int seed, ProceduralMapData map)
         {
             _seed = seed;
             _map = map;
@@ -86,35 +84,98 @@ namespace SFP.Simulation
 
         List<(float X, float Z)> PickWaypoints()
         {
-            var allWaypoints = _map.ChannelWaypoints;
-            if (allWaypoints == null || allWaypoints.Count <= 1) return new List<(float, float)>();
+            var result = new List<(float X, float Z)>();
+            var used = new HashSet<long>();
+            var nodeList = new List<(float X, float Z)>();
 
-            // Exclude spawn (index 0), shuffle the rest deterministically per round
-            var candidates = new List<(float X, float Z)>();
-            for (int i = 1; i < allWaypoints.Count; i++)
-                candidates.Add(allWaypoints[i]);
+            float headingDeg = HashToFloat(Round, 1, _seed) * 360f;
+            float headingRad = headingDeg * ((float)Math.PI / 180f);
 
-            // Fisher-Yates with hash-based determinism
-            int shuffleSeed = _seed + Round * 7919;
-            for (int i = candidates.Count - 1; i > 0; i--)
+            for (int i = 0; i < WaypointsPerRound; i++)
             {
-                int j = (int)(Hash(i, Round, shuffleSeed) % (uint)(i + 1));
-                var tmp = candidates[i];
-                candidates[i] = candidates[j];
-                candidates[j] = tmp;
+                float dist = 700f * (i + 1);
+                float spreadDeg = (HashToFloat(Round, 2 + i, _seed) - 0.5f) * 50f;
+                float totalRad = (headingDeg + spreadDeg) * ((float)Math.PI / 180f);
+
+                float candidateX = _baseX + (float)Math.Sin(totalRad) * dist;
+                float candidateZ = _baseZ + (float)Math.Cos(totalRad) * dist;
+
+                // Snap to nearest channel node
+                _map.GetNearbyChannelNodes(candidateX, candidateZ, nodeList);
+
+                float bestDist = float.MaxValue;
+                (float X, float Z) bestNode = (candidateX, candidateZ);
+                bool found = false;
+
+                for (int n = 0; n < nodeList.Count; n++)
+                {
+                    var node = nodeList[n];
+                    // Use integer key to identify unique nodes for dedup
+                    int sx = (int)Math.Floor(node.X / MapConstants.ChunkSize);
+                    int sz = (int)Math.Floor(node.Z / MapConstants.ChunkSize);
+                    long nodeKey = ((long)sx << 32) | (uint)sz;
+                    if (used.Contains(nodeKey)) continue;
+
+                    float dx = node.X - candidateX;
+                    float dz = node.Z - candidateZ;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestDist)
+                    {
+                        bestDist = d;
+                        bestNode = node;
+                        found = true;
+                    }
+                }
+
+                if (found)
+                {
+                    int bsx = (int)Math.Floor(bestNode.X / MapConstants.ChunkSize);
+                    int bsz = (int)Math.Floor(bestNode.Z / MapConstants.ChunkSize);
+                    used.Add(((long)bsx << 32) | (uint)bsz);
+                }
+
+                result.Add(bestNode);
             }
 
-            int count = Math.Min(WaypointsPerRound, candidates.Count);
-
-            // On even rounds, try to place the last waypoint at a deep point for survey
-            if (Round % 2 == 0)
+            // On even rounds, replace the last target with a deep point
+            if (Round % 2 == 0 && result.Count > 0)
             {
-                var deep = FindDeepPoint(shuffleSeed, _map);
-                if (count > 0)
-                    candidates[count - 1] = deep;
+                float lastDist = 700f * WaypointsPerRound;
+                var deep = FindDeepPoint(_seed + Round * 7919, headingDeg, lastDist);
+                result[result.Count - 1] = deep;
             }
 
-            return candidates.GetRange(0, count);
+            return result;
+        }
+
+        (float X, float Z) FindDeepPoint(int seed, float headingDeg, float lastDist)
+        {
+            (float X, float Z) best = (_baseX, _baseZ);
+            float bestFloor = float.MinValue;
+
+            for (int attempt = 0; attempt < 64; attempt++)
+            {
+                float hAngle = HashToFloat(attempt, 71, seed + 90071);
+                float hRadius = HashToFloat(attempt, 72, seed + 90071);
+
+                // Annulus [0.8, 1.2] * lastDist
+                float r = lastDist * (0.8f + hRadius * 0.4f);
+                // Within headingDeg +/- 45 degrees
+                float angleDeg = headingDeg + (hAngle - 0.5f) * 90f;
+                float angleRad = angleDeg * ((float)Math.PI / 180f);
+
+                float mx = _baseX + (float)Math.Sin(angleRad) * r;
+                float mz = _baseZ + (float)Math.Cos(angleRad) * r;
+
+                float floor = _map.GetFloorDepthAt(mx, mz);
+                if (floor > bestFloor)
+                {
+                    bestFloor = floor;
+                    best = (mx, mz);
+                }
+                if (floor >= DeepPointMinFloor) return (mx, mz);
+            }
+            return best;
         }
 
         void StartReturn()
@@ -199,32 +260,6 @@ namespace SFP.Simulation
                 else if (Phase == MissionPhase.Returning)
                     StartNextRound();
             }
-        }
-
-        static (float X, float Z) FindDeepPoint(int seed, MapData map)
-        {
-            float usableX = map.WorldSizeX - 2f * DeepPointBorderMargin;
-            float usableZ = map.WorldSizeZ - 2f * DeepPointBorderMargin;
-            if (usableX <= 0f || usableZ <= 0f) return (map.SpawnX, map.SpawnZ);
-
-            (float X, float Z) best = (map.SpawnX, map.SpawnZ);
-            float bestFloor = float.MinValue;
-            for (int attempt = 0; attempt < DeepPointMaxAttempts; attempt++)
-            {
-                float hx = HashToFloat(attempt, 71, seed + 90071);
-                float hz = HashToFloat(attempt, 72, seed + 90071);
-                float mx = DeepPointBorderMargin + hx * usableX;
-                float mz = DeepPointBorderMargin + hz * usableZ;
-
-                float floor = map.GetFloorDepthAt(mx, mz);
-                if (floor > bestFloor)
-                {
-                    bestFloor = floor;
-                    best = (mx, mz);
-                }
-                if (floor >= DeepPointMinFloor) return (mx, mz);
-            }
-            return best;
         }
 
         static float HashToFloat(int x, int z, int seed)

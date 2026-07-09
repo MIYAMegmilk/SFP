@@ -9,16 +9,48 @@ namespace SFP.Tests
     {
         const float Dt = 1f / 30f;
 
-        static MapData DefaultMap() => MapGenerator.Generate(7);
+        static ProceduralMapData DefaultMap() => new ProceduralMapData(7);
+
+        static SubmarineState SubAtSpawn(ProceduralMapData map)
+        {
+            return new SubmarineState
+            {
+                PositionX = map.SpawnX,
+                PositionZ = map.SpawnZ,
+                Depth = 300f,
+            };
+        }
+
+        static CreatureSystem SpawnCreatures(int seed, ProceduralMapData map, SubmarineState sub, int count = 6)
+        {
+            var cs = new CreatureSystem(seed, map);
+            for (int i = 0; i < 200 && cs.Creatures.Count < count; i++)
+                cs.Tick(5.1f, sub, null, null, false);
+            return cs;
+        }
 
         [Test]
-        public void Spawn_IsDeterministic_ForSameSeedAndMap()
+        public void NoCreatures_AtConstruction()
         {
-            var mapA = MapGenerator.Generate(11);
-            var mapB = MapGenerator.Generate(11);
+            var map = DefaultMap();
+            var cs = new CreatureSystem(99, map);
+            Assert.AreEqual(0, cs.Creatures.Count);
+        }
 
-            var a = new CreatureSystem(99, mapA);
-            var b = new CreatureSystem(99, mapB);
+        [Test]
+        public void Spawn_IsDeterministic_ForSameSeedAndPosition()
+        {
+            var map = DefaultMap();
+            var sub = SubAtSpawn(map);
+
+            var a = new CreatureSystem(99, map);
+            var b = new CreatureSystem(99, map);
+
+            for (int i = 0; i < 60; i++)
+            {
+                a.Tick(5.1f, sub, null, null, false);
+                b.Tick(5.1f, sub, null, null, false);
+            }
 
             Assert.AreEqual(a.Creatures.Count, b.Creatures.Count);
             Assert.Greater(a.Creatures.Count, 0);
@@ -32,42 +64,64 @@ namespace SFP.Tests
         }
 
         [Test]
-        public void Spawn_RespectsMinDistanceFromMapSpawnAndBorders()
+        public void Spawn_InRingAroundSub()
         {
             var map = DefaultMap();
-            var cs = new CreatureSystem(123, map);
+            var sub = SubAtSpawn(map);
+            var cs = SpawnCreatures(123, map, sub);
 
             Assert.Greater(cs.Creatures.Count, 0);
 
             for (int i = 0; i < cs.Creatures.Count; i++)
             {
                 var c = cs.Creatures[i];
-
-                float dx = c.X - map.SpawnX;
-                float dz = c.Z - map.SpawnZ;
+                float dx = c.X - sub.PositionX;
+                float dz = c.Z - sub.PositionZ;
                 float dist = (float)Math.Sqrt(dx * dx + dz * dz);
-                Assert.GreaterOrEqual(dist, 499.9f, $"creature {i} too close to map spawn");
-
-                Assert.GreaterOrEqual(c.X, 149.9f, $"creature {i} X too close to border");
-                Assert.LessOrEqual(c.X, map.WorldSizeX - 149.9f, $"creature {i} X too close to border");
-                Assert.GreaterOrEqual(c.Z, 149.9f, $"creature {i} Z too close to border");
-                Assert.LessOrEqual(c.Z, map.WorldSizeZ - 149.9f, $"creature {i} Z too close to border");
+                Assert.GreaterOrEqual(dist, 399f, $"creature {i} too close");
+                Assert.LessOrEqual(dist, 701f, $"creature {i} too far");
             }
+        }
+
+        [Test]
+        public void Despawn_RemovesCreaturesBeyondRadius()
+        {
+            var map = DefaultMap();
+            var sub = SubAtSpawn(map);
+            var cs = SpawnCreatures(5, map, sub);
+            Assert.Greater(cs.Creatures.Count, 0);
+
+            var c = cs.Creatures[0];
+            c.X = sub.PositionX + 1300f;
+
+            int countBefore = cs.Creatures.Count;
+            cs.Tick(Dt, sub, null, null, false);
+
+            Assert.Less(cs.Creatures.Count, countBefore);
+        }
+
+        [Test]
+        public void CountNeverExceedsMax()
+        {
+            var map = DefaultMap();
+            var sub = SubAtSpawn(map);
+            var cs = new CreatureSystem(10, map) { MaxActiveCreatures = 4 };
+
+            for (int i = 0; i < 200; i++)
+                cs.Tick(5.1f, sub, null, null, false);
+
+            Assert.LessOrEqual(cs.Creatures.Count, 4);
         }
 
         [Test]
         public void Approach_MovesCloserToStationarySub_OverTicks()
         {
             var map = DefaultMap();
-            var cs = new CreatureSystem(5, map);
+            var sub = SubAtSpawn(map);
+            var cs = SpawnCreatures(5, map, sub);
             Assert.Greater(cs.Creatures.Count, 0);
 
             var c = cs.Creatures[0];
-            var sub = new SubmarineState { PositionX = 1000f, PositionZ = 1000f, Depth = 300f };
-
-            c.X = 1500f;
-            c.Z = 1000f;
-            c.Depth = 300f;
             c.Behavior = CreatureBehavior.Approach;
 
             float dxBefore = sub.PositionX - c.X;
@@ -81,52 +135,52 @@ namespace SFP.Tests
             float dzAfter = sub.PositionZ - c.Z;
             float distAfter = (float)Math.Sqrt(dxAfter * dxAfter + dzAfter * dzAfter);
 
-            Assert.Less(distAfter, distBefore, "Approach behavior should move the creature closer to the sub");
+            Assert.Less(distAfter, distBefore);
         }
 
         [Test]
         public void TakeDamage_BelowThirtyHealth_SetsFlee_AndZero_KillsAndIsIgnored()
         {
             var map = DefaultMap();
-            var cs = new CreatureSystem(9, map);
+            var sub = SubAtSpawn(map);
+            var cs = SpawnCreatures(9, map, sub);
             Assert.Greater(cs.Creatures.Count, 0);
 
             var c = cs.Creatures[0];
             int id = c.Id;
 
-            cs.TakeDamage(id, 75f); // 100 -> 25, below 30
+            cs.TakeDamage(id, 75f);
             Assert.AreEqual(25f, c.Health, 1e-4f);
             Assert.AreEqual(CreatureBehavior.Flee, c.Behavior);
             Assert.IsFalse(c.IsDead);
 
-            cs.TakeDamage(id, 25f); // 25 -> 0
+            cs.TakeDamage(id, 25f);
             Assert.AreEqual(0f, c.Health, 1e-4f);
             Assert.IsTrue(c.IsDead);
 
             float xBefore = c.X, zBefore = c.Z, depthBefore = c.Depth;
-            var sub = new SubmarineState { PositionX = c.X, PositionZ = c.Z, Depth = c.Depth };
             cs.Tick(Dt, sub, null, null, true);
 
-            Assert.AreEqual(xBefore, c.X, 1e-6f, "Dead creature must be ignored by Tick");
-            Assert.AreEqual(zBefore, c.Z, 1e-6f, "Dead creature must be ignored by Tick");
-            Assert.AreEqual(depthBefore, c.Depth, 1e-6f, "Dead creature must be ignored by Tick");
+            Assert.AreEqual(xBefore, c.X, 1e-6f);
+            Assert.AreEqual(zBefore, c.Z, 1e-6f);
+            Assert.AreEqual(depthBefore, c.Depth, 1e-6f);
         }
 
         [Test]
         public void TurretTryFire_HitsCreatureDeadAhead_AndConsumesAmmo()
         {
             var map = DefaultMap();
-            var cs = new CreatureSystem(3, map);
+            var sub = SubAtSpawn(map);
+            var cs = SpawnCreatures(3, map, sub);
             Assert.Greater(cs.Creatures.Count, 0);
 
             var target = cs.Creatures[0];
-            var sub = new SubmarineState { PositionX = 0f, PositionZ = 0f, Depth = 100f };
-            target.X = 0f;
-            target.Z = 300f; // dead ahead, bearing 0 = north/+Z
+            target.X = sub.PositionX;
+            target.Z = sub.PositionZ + 300f;
             target.Depth = sub.Depth;
 
             var turret = new TurretState();
-            turret.Tick(2f, null); // charge cooldown fully, no power node -> always powered
+            turret.Tick(2f, null);
 
             bool fired = turret.TryFire(0f, sub, cs, out int hitId, out float hitDist);
 
@@ -140,13 +194,13 @@ namespace SFP.Tests
         public void TurretTryFire_MissesWhenBearingIsNinetyDegreesOff()
         {
             var map = DefaultMap();
-            var cs = new CreatureSystem(3, map);
+            var sub = SubAtSpawn(map);
+            var cs = SpawnCreatures(3, map, sub);
             Assert.Greater(cs.Creatures.Count, 0);
 
             var target = cs.Creatures[0];
-            var sub = new SubmarineState { PositionX = 0f, PositionZ = 0f, Depth = 100f };
-            target.X = 0f;
-            target.Z = 300f; // bearing 0 relative to sub
+            target.X = sub.PositionX;
+            target.Z = sub.PositionZ + 300f;
             target.Depth = sub.Depth;
             target.IsDead = false;
 
@@ -155,7 +209,7 @@ namespace SFP.Tests
 
             bool fired = turret.TryFire(90f, sub, cs, out int hitId, out float hitDist);
 
-            Assert.IsTrue(fired, "A shot should still fire even if it misses");
+            Assert.IsTrue(fired);
             Assert.AreEqual(-1, hitId);
         }
 
@@ -163,9 +217,9 @@ namespace SFP.Tests
         public void TurretTryFire_ReturnsFalse_WhenOutOfAmmo()
         {
             var map = DefaultMap();
-            var cs = new CreatureSystem(3, map);
+            var sub = SubAtSpawn(map);
+            var cs = SpawnCreatures(3, map, sub);
 
-            var sub = new SubmarineState { PositionX = 0f, PositionZ = 0f, Depth = 100f };
             var turret = new TurretState { AmmoCount = 0 };
             turret.Tick(2f, null);
 

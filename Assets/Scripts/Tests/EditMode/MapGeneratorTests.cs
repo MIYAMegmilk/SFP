@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 using SFP.Simulation;
 
@@ -7,49 +8,76 @@ namespace SFP.Tests
     public class MapGeneratorTests
     {
         [Test]
-        public void Generate_IsDeterministic_ForSameSeed()
+        public void GenerateChunk_IsDeterministic_ForSameSeed()
         {
-            var a = MapGenerator.Generate(42, worldSize: 400f, cellSize: 8f);
-            var b = MapGenerator.Generate(42, worldSize: 400f, cellSize: 8f);
+            var coord = new ChunkCoord(3, -2);
+            var a = MapGenerator.GenerateChunk(42, coord);
+            var b = MapGenerator.GenerateChunk(42, coord);
 
             Assert.AreEqual(a.FloorDepth.Length, b.FloorDepth.Length);
             for (int i = 0; i < a.FloorDepth.Length; i++)
                 Assert.AreEqual(a.FloorDepth[i], b.FloorDepth[i], 1e-6f);
+            for (int i = 0; i < a.CeilingDepth.Length; i++)
+                Assert.AreEqual(a.CeilingDepth[i], b.CeilingDepth[i], 1e-6f);
         }
 
         [Test]
         public void SpawnPoint_IsDeepEnough()
         {
-            var map = MapGenerator.Generate(7);
+            var map = new ProceduralMapData(7);
             float depth = map.GetFloorDepthAt(map.SpawnX, map.SpawnZ);
             Assert.GreaterOrEqual(depth, 400f);
         }
 
         [Test]
-        public void BorderCells_AreAboveSeaLevel()
+        public void AdjacentChunks_ShareBorderVertices()
         {
-            var map = MapGenerator.Generate(7);
+            int seed = 42;
+            var left = MapGenerator.GenerateChunk(seed, new ChunkCoord(0, 0));
+            var right = MapGenerator.GenerateChunk(seed, new ChunkCoord(1, 0));
 
-            for (int x = 0; x < map.CellsX; x++)
+            int vps = TerrainChunk.VertsPerSide;
+            for (int vz = 0; vz < vps; vz++)
             {
-                Assert.LessOrEqual(map.FloorDepth[0 * map.CellsX + x], 0f, $"z=0 x={x}");
-                Assert.LessOrEqual(map.FloorDepth[(map.CellsZ - 1) * map.CellsX + x], 0f, $"z=max x={x}");
-            }
-            for (int z = 0; z < map.CellsZ; z++)
-            {
-                Assert.LessOrEqual(map.FloorDepth[z * map.CellsX + 0], 0f, $"x=0 z={z}");
-                Assert.LessOrEqual(map.FloorDepth[z * map.CellsX + (map.CellsX - 1)], 0f, $"x=max z={z}");
+                float leftBorder = left.FloorDepth[vz * vps + (vps - 1)];
+                float rightBorder = right.FloorDepth[vz * vps + 0];
+                Assert.AreEqual(leftBorder, rightBorder, 1e-6f, $"floor seam at vz={vz}");
+
+                float leftCeil = left.CeilingDepth[vz * vps + (vps - 1)];
+                float rightCeil = right.CeilingDepth[vz * vps + 0];
+                Assert.AreEqual(leftCeil, rightCeil, 1e-6f, $"ceiling seam at vz={vz}");
             }
         }
 
         [Test]
-        public void GetFloorDepthAt_AtCellCorner_MatchesArrayValue()
+        public void AdjacentChunks_ShareBorderVertices_ZAxis()
         {
-            var map = MapGenerator.Generate(7, worldSize: 400f, cellSize: 8f);
+            int seed = 42;
+            var bottom = MapGenerator.GenerateChunk(seed, new ChunkCoord(0, 0));
+            var top = MapGenerator.GenerateChunk(seed, new ChunkCoord(0, 1));
 
-            int x0 = 15, z0 = 15;
-            float expected = map.FloorDepth[z0 * map.CellsX + x0];
-            float sampled = map.GetFloorDepthAt(x0 * map.CellSize, z0 * map.CellSize);
+            int vps = TerrainChunk.VertsPerSide;
+            for (int vx = 0; vx < vps; vx++)
+            {
+                float bottomBorder = bottom.FloorDepth[(vps - 1) * vps + vx];
+                float topBorder = top.FloorDepth[0 * vps + vx];
+                Assert.AreEqual(bottomBorder, topBorder, 1e-6f, $"floor seam at vx={vx}");
+            }
+        }
+
+        [Test]
+        public void GetFloorDepthAt_MatchesBilinearOfChunk()
+        {
+            var map = new ProceduralMapData(7);
+            var coord = new ChunkCoord(1, 1);
+            var chunk = map.GetChunk(coord);
+
+            int vps = TerrainChunk.VertsPerSide;
+            int vx = 15, vz = 15;
+            float expected = chunk.FloorDepth[vz * vps + vx];
+            float wx = coord.OriginX + vx * MapConstants.CellSize;
+            float wz = coord.OriginZ + vz * MapConstants.CellSize;
+            float sampled = map.GetFloorDepthAt(wx, wz);
 
             Assert.AreEqual(expected, sampled, 1e-3f);
         }
@@ -57,85 +85,73 @@ namespace SFP.Tests
         [Test]
         public void GetFloorDepthAt_BilinearInterpolation_IsBetweenNeighbors()
         {
-            var map = MapGenerator.Generate(7, worldSize: 400f, cellSize: 8f);
+            var map = new ProceduralMapData(7);
+            var coord = new ChunkCoord(0, 0);
+            var chunk = map.GetChunk(coord);
 
-            int x0 = 10, z0 = 10;
-            float d00 = map.FloorDepth[z0 * map.CellsX + x0];
-            float d10 = map.FloorDepth[z0 * map.CellsX + (x0 + 1)];
+            int vps = TerrainChunk.VertsPerSide;
+            int vx = 10, vz = 10;
+            float d00 = chunk.FloorDepth[vz * vps + vx];
+            float d10 = chunk.FloorDepth[vz * vps + (vx + 1)];
 
-            float sampled = map.GetFloorDepthAt((x0 + 0.5f) * map.CellSize, z0 * map.CellSize);
+            float wx = coord.OriginX + (vx + 0.5f) * MapConstants.CellSize;
+            float wz = coord.OriginZ + vz * MapConstants.CellSize;
+            float sampled = map.GetFloorDepthAt(wx, wz);
 
-            float lo = System.Math.Min(d00, d10);
-            float hi = System.Math.Max(d00, d10);
+            float lo = Math.Min(d00, d10);
+            float hi = Math.Max(d00, d10);
             Assert.GreaterOrEqual(sampled, lo - 1e-4f);
             Assert.LessOrEqual(sampled, hi + 1e-4f);
         }
 
         [Test]
-        public void Generate_CeilingIsDeterministic_ForSameSeed()
+        public void ChannelNetwork_NodesHaveOpenWater()
         {
-            var a = MapGenerator.Generate(42, worldSize: 400f, cellSize: 8f);
-            var b = MapGenerator.Generate(42, worldSize: 400f, cellSize: 8f);
+            var map = new ProceduralMapData(7);
+            var nodes = new System.Collections.Generic.List<(float X, float Z)>();
+            map.GetNearbyChannelNodes(map.SpawnX, map.SpawnZ, nodes);
 
-            Assert.AreEqual(a.CeilingDepth.Length, b.CeilingDepth.Length);
-            for (int i = 0; i < a.CeilingDepth.Length; i++)
-                Assert.AreEqual(a.CeilingDepth[i], b.CeilingDepth[i], 1e-6f);
-        }
-
-        [Test]
-        public void ChannelNetwork_IsNavigable()
-        {
-            var map = MapGenerator.Generate(7);
-
-            Assert.GreaterOrEqual(map.ChannelWaypoints.Count, 4);
-
-            for (int w = 1; w < map.ChannelWaypoints.Count; w++)
+            Assert.Greater(nodes.Count, 0);
+            foreach (var node in nodes)
             {
-                var a = map.ChannelWaypoints[w - 1];
-                var b = map.ChannelWaypoints[w];
-
-                for (int i = 0; i <= 20; i++)
-                {
-                    float t = i / 20f;
-                    float x = a.X + (b.X - a.X) * t;
-                    float z = a.Z + (b.Z - a.Z) * t;
-
-                    Assert.AreEqual(0f, map.GetCeilingDepthAt(x, z), 1e-3f, $"w={w} t={t}");
-                    Assert.GreaterOrEqual(map.GetFloorDepthAt(x, z), 300f, $"w={w} t={t}");
-                }
+                float floor = map.GetFloorDepthAt(node.X, node.Z);
+                Assert.GreaterOrEqual(floor, 300f, $"node ({node.X},{node.Z}) floor too shallow");
             }
         }
 
         [Test]
         public void Mines_AreValidPlacements()
         {
-            var map = MapGenerator.Generate(7);
+            var map = new ProceduralMapData(7);
+            var results = new System.Collections.Generic.List<(float X, float Z, float Depth)>();
+            int totalMines = 0;
 
-            Assert.Greater(map.MineSpots.Count, 0);
-
-            foreach (var mine in map.MineSpots)
+            for (int cx = -3; cx <= 3; cx++)
             {
-                float dx = mine.X - map.SpawnX;
-                float dz = mine.Z - map.SpawnZ;
-                float distToSpawn = (float)System.Math.Sqrt(dx * dx + dz * dz);
-                Assert.GreaterOrEqual(distToSpawn, 350f);
-
-                float floor = map.GetFloorDepthAt(mine.X, mine.Z);
-                float ceiling = map.GetCeilingDepthAt(mine.X, mine.Z);
-                Assert.Less(mine.Depth, floor);
-                Assert.Greater(mine.Depth, ceiling);
+                for (int cz = -3; cz <= 3; cz++)
+                {
+                    map.GetMinesForChunk(new ChunkCoord(cx, cz), results);
+                    foreach (var mine in results)
+                    {
+                        totalMines++;
+                        float floor = map.GetFloorDepthAt(mine.X, mine.Z);
+                        Assert.Less(mine.Depth, floor, $"mine depth below floor at ({mine.X},{mine.Z})");
+                        Assert.Greater(mine.Depth, 0f, $"mine above surface at ({mine.X},{mine.Z})");
+                    }
+                }
             }
         }
 
         [Test]
         public void Ceiling_NeverFullySealsWaterColumn()
         {
-            var map = MapGenerator.Generate(7);
+            var chunk = MapGenerator.GenerateChunk(7, new ChunkCoord(0, 0));
+            int vps = TerrainChunk.VertsPerSide;
 
-            for (int i = 0; i < map.CeilingDepth.Length; i++)
+            for (int i = 0; i < vps * vps; i++)
             {
-                if (map.CeilingDepth[i] > 0f)
-                    Assert.Less(map.CeilingDepth[i], map.FloorDepth[i], $"cell {i}");
+                if (chunk.CeilingDepth[i] > 0f)
+                    Assert.Less(chunk.CeilingDepth[i], chunk.FloorDepth[i], $"vertex {i}");
             }
         }
     }

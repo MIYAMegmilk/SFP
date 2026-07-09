@@ -11,29 +11,25 @@ namespace SFP.Simulation
 
         const float Eps = 1f;
         const float DepthFalloff = 800f;
-        const float BorderRange = 100f;
 
         readonly int _seed;
-        readonly float _worldSize;
 
-        public OceanCurrentField(int seed, float worldSize)
+        public OceanCurrentField(int seed)
         {
             _seed = seed;
-            _worldSize = worldSize;
         }
 
         public float MaxCurrentSpeed => Amp1 + Amp2;
 
-        // Full current at a world position, including depth attenuation and border damping.
+        // Full current at a world position, including depth attenuation.
         public void Sample(float x, float z, float depth, out float velX, out float velZ)
         {
             SampleRaw(x, z, out float vx, out float vz);
 
             float depthFactor = ComputeDepthFactor(depth);
-            float borderFactor = ComputeBorderFactor(x, z, _worldSize);
 
-            velX = vx * depthFactor * borderFactor;
-            velZ = vz * depthFactor * borderFactor;
+            velX = vx * depthFactor;
+            velZ = vz * depthFactor;
         }
 
         // Curl-noise current before depth/border shaping (still clamped to MaxCurrentSpeed).
@@ -60,13 +56,6 @@ namespace SFP.Simulation
         public static float ComputeDepthFactor(float depth)
         {
             return (float)Math.Max(0.1, 1.0 - depth / DepthFalloff);
-        }
-
-        public static float ComputeBorderFactor(float x, float z, float worldSize)
-        {
-            float distToEdge = Math.Min(Math.Min(x, worldSize - x), Math.Min(z, worldSize - z));
-            float t = (float)Math.Min(1.0, distToEdge / BorderRange);
-            return t < 0f ? 0f : t;
         }
 
         // Divergence-free flow: current = (dPhi/dz, -dPhi/dx) for scalar potential Phi.

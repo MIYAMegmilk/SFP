@@ -59,7 +59,7 @@ namespace SFP.Presentation
         public PowerGrid PowerGrid => _powerGrid;
         public AtmosphereSystem Atmosphere => _atmosphere;
         public DamageSystem DamageSystem => _damageSystem;
-        public MapData Map { get; private set; }
+        public ProceduralMapData Map { get; private set; }
         public TerrainModel Terrain { get; private set; }
         public MineSystem MineSystem { get; private set; }
         public CreatureSystem Creatures { get; private set; }
@@ -232,6 +232,9 @@ namespace SFP.Presentation
                 };
                 _sonars.Add(sonar);
                 sd.SonarIndex = i;
+                var sonarAudio = sd.GetComponent<SonarAudio>();
+                if (sonarAudio != null)
+                    sonarAudio.Init(sonar);
             }
 
             var fabDefs = FindObjectsByType<FabricatorDefinition>(FindObjectsSortMode.None);
@@ -255,17 +258,14 @@ namespace SFP.Presentation
                 fd.FabricatorIndex = i;
             }
 
-            Map = MapGenerator.Generate(MapSeed);
+            Map = new ProceduralMapData(MapSeed);
             Terrain = new TerrainModel { SeaFloorDepth = SeaFloorDepth, Map = Map };
             _subState.PositionX = Map.SpawnX;
             _subState.PositionZ = Map.SpawnZ;
 
-            MineSystem = new MineSystem();
-            foreach (var spot in Map.MineSpots)
-                MineSystem.AddMine(spot.X, spot.Z, spot.Depth);
-
+            MineSystem = new MineSystem(MapSeed, Map);
             Creatures = new CreatureSystem(MapSeed, Map);
-            OceanCurrents = new OceanCurrentField(MapSeed, Map.WorldSizeX);
+            OceanCurrents = new OceanCurrentField(MapSeed);
 
             _damageSystem = new DamageSystem(_graph, _subState);
             _damageSystem.Terrain = Terrain;

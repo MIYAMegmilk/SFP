@@ -7,238 +7,160 @@ namespace SFP.Simulation
     {
         const float BaseFreq = 1f / 420f;
         const float RidgeFreq = 1f / 600f;
-        const float BorderWidth = 120f;
         const float SpawnRadius = 120f;
         const float SpawnDepth = 450f;
-
-        // caves / ceiling
         const float CaveFreq = 1f / 550f;
-
-        // guaranteed channel network
-        const float ChannelMinSpacing = 400f;
-        const float ChannelBorderMargin = 150f;
-        const float ChannelJitter = 20f;
-        const int ChannelSubdivisions = 6;
-        const float ChannelForceRadius = 60f;
-        const float ChannelBlendWidth = 40f;
-
-        // mines
-        const int MineCount = 24;
         const float MineMinSpawnDist = 350f;
-        const float MineBorderMargin = 150f;
 
-        public static MapData Generate(int seed, float worldSize = 2000f, float cellSize = 8f)
+        public static void SampleTerrain(int seed, float wx, float wz,
+                                         out float floorDepth, out float ceilingDepth)
         {
-            int cells = Math.Max(2, (int)Math.Round(worldSize / cellSize));
-            var map = new MapData
+            // 1. Base depth: fBm
+            float baseNoise = Fbm(wx * BaseFreq, wz * BaseFreq, seed, 4);
+            float depth = 350f + baseNoise * 250f;
+
+            // 2. Ridged peaks
+            float ridge = RidgedFbm(wx * RidgeFreq, wz * RidgeFreq, seed + 9973, 4);
+            if (ridge > 0.55f)
             {
-                CellsX = cells,
-                CellsZ = cells,
-                CellSize = cellSize,
-                OriginX = 0f,
-                OriginZ = 0f,
-                Seed = seed,
-                FloorDepth = new float[cells * cells],
-                CeilingDepth = new float[cells * cells],
-                SpawnX = worldSize * 0.3f,
-                SpawnZ = worldSize * 0.5f,
+                float t = Smoothstep(Clamp01((ridge - 0.55f) / 0.45f));
+                float peakDepth = 150f - t * 90f;
+                depth = Lerp(depth, peakDepth, t);
+            }
+
+            // 3. Border falloff — deleted (infinite world, no edges)
+
+            // 4. Spawn basin: around channel network sector (0,0) node
+            var spawn = GetSpawnPoint(seed);
+            float dx = wx - spawn.X;
+            float dz = wz - spawn.Z;
+            float distToSpawn = (float)Math.Sqrt(dx * dx + dz * dz);
+            if (distToSpawn < SpawnRadius)
+            {
+                float t = Smoothstep(Clamp01(1f - distToSpawn / SpawnRadius));
+                float basinDepth = Math.Max(depth, SpawnDepth);
+                depth = Lerp(depth, basinDepth, t);
+            }
+
+            // 5. Ceiling cave noise
+            float ceiling = 0f;
+            if (depth > 0f)
+            {
+                float caveNoise = Fbm(wx * CaveFreq, wz * CaveFreq, seed + 55555, 4);
+                if (caveNoise > 0.55f)
+                {
+                    float t = Smoothstep(Clamp01((caveNoise - 0.55f) / 0.45f));
+                    float gapNoise = Fbm(wx * CaveFreq * 1.3f, wz * CaveFreq * 1.3f, seed + 66666, 3);
+                    float gap = Lerp(40f, 90f, gapNoise);
+                    float ceilingTarget = Math.Max(0f, depth - gap);
+                    ceiling = Lerp(0f, ceilingTarget, t);
+                }
+            }
+
+            // 6. Channel carve via ChannelNetwork
+            float chanDist = ChannelNetwork.DistanceToNetwork(wx, wz, seed);
+            if (chanDist < ChannelNetwork.ForceRadius + ChannelNetwork.BlendWidth)
+            {
+                float ft = chanDist <= ChannelNetwork.ForceRadius
+                    ? 1f
+                    : Smoothstep(Clamp01(1f - (chanDist - ChannelNetwork.ForceRadius) / ChannelNetwork.BlendWidth));
+                float forcedFloor = Math.Max(depth, 350f);
+                depth = Lerp(depth, forcedFloor, ft);
+                ceiling = Lerp(ceiling, 0f, ft);
+            }
+
+            floorDepth = depth;
+            ceilingDepth = ceiling;
+        }
+
+        public static float SampleFloorDepth(int seed, float wx, float wz)
+        {
+            SampleTerrain(seed, wx, wz, out float floor, out _);
+            return floor;
+        }
+
+        public static float SampleCeilingDepth(int seed, float wx, float wz)
+        {
+            SampleTerrain(seed, wx, wz, out _, out float ceiling);
+            return ceiling;
+        }
+
+        public static TerrainChunk GenerateChunk(int seed, ChunkCoord coord)
+        {
+            int vps = TerrainChunk.VertsPerSide;
+            var chunk = new TerrainChunk
+            {
+                Coord = coord,
+                FloorDepth = new float[vps * vps],
+                CeilingDepth = new float[vps * vps],
+                HasCeiling = false
             };
 
-            var waypoints = GenerateChannelWaypoints(seed, worldSize, map.SpawnX, map.SpawnZ);
-            var channelSegments = BuildChannelSegments(waypoints, seed);
+            float ox = coord.OriginX;
+            float oz = coord.OriginZ;
 
-            for (int z = 0; z < cells; z++)
+            for (int vz = 0; vz < vps; vz++)
             {
-                for (int x = 0; x < cells; x++)
+                for (int vx = 0; vx < vps; vx++)
                 {
-                    float wx = x * cellSize;
-                    float wz = z * cellSize;
-
-                    float baseNoise = Fbm(wx * BaseFreq, wz * BaseFreq, seed, 4);
-                    float depth = 350f + baseNoise * 250f;
-
-                    float ridge = RidgedFbm(wx * RidgeFreq, wz * RidgeFreq, seed + 9973, 4);
-                    if (ridge > 0.55f)
-                    {
-                        float t = Smoothstep(Clamp01((ridge - 0.55f) / 0.45f));
-                        float peakDepth = 150f - t * 90f;
-                        depth = Lerp(depth, peakDepth, t);
-                    }
-
-                    float distToEdge = Math.Min(Math.Min(wx, worldSize - wx), Math.Min(wz, worldSize - wz));
-                    if (distToEdge < BorderWidth)
-                    {
-                        float t = Smoothstep(Clamp01(1f - distToEdge / BorderWidth));
-                        depth = Lerp(depth, -50f, t);
-                    }
-
-                    float dx = wx - map.SpawnX;
-                    float dz = wz - map.SpawnZ;
-                    float distToSpawn = (float)Math.Sqrt(dx * dx + dz * dz);
-                    if (distToSpawn < SpawnRadius)
-                    {
-                        float t = Smoothstep(Clamp01(1f - distToSpawn / SpawnRadius));
-                        float basinDepth = Math.Max(depth, SpawnDepth);
-                        depth = Lerp(depth, basinDepth, t);
-                    }
-
-                    // Ceiling rock (caves/canyons/tunnels): only where the seabed is actually
-                    // open water (border walls already block, keep CeilingDepth = 0 there).
-                    float ceiling = 0f;
-                    if (depth > 0f)
-                    {
-                        float caveNoise = Fbm(wx * CaveFreq, wz * CaveFreq, seed + 55555, 4);
-                        if (caveNoise > 0.55f)
-                        {
-                            float t = Smoothstep(Clamp01((caveNoise - 0.55f) / 0.45f));
-                            float gapNoise = Fbm(wx * CaveFreq * 1.3f, wz * CaveFreq * 1.3f, seed + 66666, 3);
-                            float gap = Lerp(40f, 90f, gapNoise);
-                            float ceilingTarget = Math.Max(0f, depth - gap);
-                            ceiling = Lerp(0f, ceilingTarget, t);
-                        }
-                    }
-
-                    // Guaranteed channel network: force clear water near the waypoint polyline.
-                    float chanDist = float.MaxValue;
-                    for (int i = 0; i < channelSegments.Count; i++)
-                    {
-                        var seg = channelSegments[i];
-                        float d = DistanceToSegment(wx, wz, seg.AX, seg.AZ, seg.BX, seg.BZ);
-                        if (d < chanDist) chanDist = d;
-                    }
-                    if (chanDist < ChannelForceRadius + ChannelBlendWidth)
-                    {
-                        float ft = chanDist <= ChannelForceRadius
-                            ? 1f
-                            : Smoothstep(Clamp01(1f - (chanDist - ChannelForceRadius) / ChannelBlendWidth));
-                        float forcedFloor = Math.Max(depth, 350f);
-                        depth = Lerp(depth, forcedFloor, ft);
-                        ceiling = Lerp(ceiling, 0f, ft);
-                    }
-
-                    map.FloorDepth[z * cells + x] = depth;
-                    map.CeilingDepth[z * cells + x] = ceiling;
+                    float wx = ox + vx * MapConstants.CellSize;
+                    float wz = oz + vz * MapConstants.CellSize;
+                    SampleTerrain(seed, wx, wz, out float floor, out float ceiling);
+                    int idx = vz * vps + vx;
+                    chunk.FloorDepth[idx] = floor;
+                    chunk.CeilingDepth[idx] = ceiling;
+                    if (ceiling > 0.01f) chunk.HasCeiling = true;
                 }
             }
 
-            map.ChannelWaypoints = waypoints;
-            map.MineSpots = GenerateMines(map, seed, worldSize);
-
-            return map;
+            return chunk;
         }
 
-        static List<(float X, float Z)> GenerateChannelWaypoints(int seed, float worldSize, float spawnX, float spawnZ)
+        public static void GenerateMinesForChunk(int seed, ChunkCoord coord, ProceduralMapData map,
+                                                  List<(float X, float Z, float Depth)> results)
         {
-            var pts = new List<(float X, float Z)> { (spawnX, spawnZ) };
-            int count = 4 + (int)(Hash(0, 0, seed + 31337) % 3);
-            float usable = worldSize - 2f * ChannelBorderMargin;
-            if (usable <= 0f) return pts;
+            results.Clear();
 
-            int attempt = 0;
-            while (pts.Count < count && attempt < 2000)
+            int cx = coord.X;
+            int cz = coord.Z;
+
+            // ~0.4 probability per chunk
+            if (SimHash.HashToFloat(cx, cz, seed + 60013) >= 0.4f) return;
+
+            var spawn = GetSpawnPoint(seed);
+            float chunkOriginX = coord.OriginX;
+            float chunkOriginZ = coord.OriginZ;
+
+            for (int attempt = 0; attempt < 8; attempt++)
             {
-                float hx = HashToFloat(attempt, 0, seed + 4001);
-                float hz = HashToFloat(attempt, 1, seed + 4001);
-                float cx = ChannelBorderMargin + hx * usable;
-                float cz = ChannelBorderMargin + hz * usable;
-                attempt++;
+                float hx = SimHash.HashToFloat(cx * 1000 + attempt, cz, seed + 60014);
+                float hz = SimHash.HashToFloat(cx, cz * 1000 + attempt, seed + 60015);
+                float mx = chunkOriginX + hx * MapConstants.ChunkSize;
+                float mz = chunkOriginZ + hz * MapConstants.ChunkSize;
 
-                bool ok = true;
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    float dx = cx - pts[i].X;
-                    float dz = cz - pts[i].Z;
-                    if (dx * dx + dz * dz < ChannelMinSpacing * ChannelMinSpacing) { ok = false; break; }
-                }
-                if (ok) pts.Add((cx, cz));
-            }
-            return pts;
-        }
-
-        static List<(float AX, float AZ, float BX, float BZ)> BuildChannelSegments(List<(float X, float Z)> waypoints, int seed)
-        {
-            var segs = new List<(float AX, float AZ, float BX, float BZ)>();
-            for (int w = 1; w < waypoints.Count; w++)
-            {
-                var a = waypoints[w - 1];
-                var b = waypoints[w];
-                float dx = b.X - a.X;
-                float dz = b.Z - a.Z;
-                float len = (float)Math.Sqrt(dx * dx + dz * dz);
-                float dirX = len > 0.001f ? dx / len : 1f;
-                float dirZ = len > 0.001f ? dz / len : 0f;
-                float perpX = -dirZ;
-                float perpZ = dirX;
-
-                float px = a.X, pz = a.Z;
-                for (int s = 1; s <= ChannelSubdivisions; s++)
-                {
-                    float t = (float)s / ChannelSubdivisions;
-                    float bx = a.X + dx * t;
-                    float bz = a.Z + dz * t;
-                    if (s < ChannelSubdivisions)
-                    {
-                        float jitterT = (float)Math.Sin(t * Math.PI);
-                        float jh = HashToFloat(w * 97 + s, 13, seed + 8807) * 2f - 1f;
-                        float offset = jh * ChannelJitter * jitterT;
-                        bx += perpX * offset;
-                        bz += perpZ * offset;
-                    }
-                    segs.Add((px, pz, bx, bz));
-                    px = bx; pz = bz;
-                }
-            }
-            return segs;
-        }
-
-        static float DistanceToSegment(float px, float pz, float ax, float az, float bx, float bz)
-        {
-            float dx = bx - ax;
-            float dz = bz - az;
-            float lenSq = dx * dx + dz * dz;
-            float t = lenSq > 0.0001f ? ((px - ax) * dx + (pz - az) * dz) / lenSq : 0f;
-            if (t < 0f) t = 0f;
-            else if (t > 1f) t = 1f;
-            float cx = ax + dx * t;
-            float cz = az + dz * t;
-            float ex = px - cx;
-            float ez = pz - cz;
-            return (float)Math.Sqrt(ex * ex + ez * ez);
-        }
-
-        static List<(float X, float Z, float Depth)> GenerateMines(MapData map, int seed, float worldSize)
-        {
-            var mines = new List<(float X, float Z, float Depth)>();
-            float usable = worldSize - 2f * MineBorderMargin;
-            if (usable <= 0f) return mines;
-
-            int attempt = 0;
-            while (mines.Count < MineCount && attempt < 6000)
-            {
-                float hx = HashToFloat(attempt, 51, seed + 60013);
-                float hz = HashToFloat(attempt, 52, seed + 60013);
-                float mx = MineBorderMargin + hx * usable;
-                float mz = MineBorderMargin + hz * usable;
-                attempt++;
-
-                float dxSpawn = mx - map.SpawnX;
-                float dzSpawn = mz - map.SpawnZ;
+                float dxSpawn = mx - spawn.X;
+                float dzSpawn = mz - spawn.Z;
                 if (dxSpawn * dxSpawn + dzSpawn * dzSpawn < MineMinSpawnDist * MineMinSpawnDist) continue;
 
                 float floor = map.GetFloorDepthAt(mx, mz);
                 if (floor < 150f) continue;
 
-                float ceiling = map.GetCeilingDepthAt(mx, mz);
+                float ceilingVal = map.GetCeilingDepthAt(mx, mz);
                 float minDepth = 80f;
-                if (ceiling > 0f) minDepth = Math.Max(minDepth, ceiling + 20f);
+                if (ceilingVal > 0f) minDepth = Math.Max(minDepth, ceilingVal + 20f);
                 float maxDepth = floor - 40f;
                 if (maxDepth <= minDepth) continue;
 
-                float dh = HashToFloat(attempt, 53, seed + 60013);
+                float dh = SimHash.HashToFloat(cx + attempt * 73, cz + attempt * 37, seed + 60016);
                 float depth = Lerp(minDepth, maxDepth, dh);
-                mines.Add((mx, mz, depth));
+                results.Add((mx, mz, depth));
+                return; // one mine per chunk
             }
-            return mines;
+        }
+
+        public static (float X, float Z) GetSpawnPoint(int seed)
+        {
+            return ChannelNetwork.GetNode(0, 0, seed);
         }
 
         static float Fbm(float x, float z, int seed, int octaves)
@@ -289,6 +211,7 @@ namespace SFP.Simulation
             return Lerp(nx0, nx1, tz);
         }
 
+        // Keep private copies of hash/math helpers to avoid churn in existing callers
         static float HashToFloat(int x, int z, int seed)
         {
             uint h = Hash(x, z, seed);

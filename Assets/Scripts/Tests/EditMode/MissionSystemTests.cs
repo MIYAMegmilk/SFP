@@ -14,6 +14,8 @@ namespace SFP.Tests
             public string Label;
         }
 
+        static ProceduralMapData DefaultMap(int seed = 11) => new ProceduralMapData(seed);
+
         static List<QueuedTarget> DrainOutbound(MissionSystem ms)
         {
             var result = new List<QueuedTarget>();
@@ -34,7 +36,7 @@ namespace SFP.Tests
         [Test]
         public void BuildQueue_IsDeterministic_ForSameSeedAndMap()
         {
-            var map = MapGenerator.Generate(21);
+            var map = DefaultMap(21);
             var a = new MissionSystem(21, map);
             var b = new MissionSystem(21, map);
 
@@ -55,7 +57,7 @@ namespace SFP.Tests
         [Test]
         public void ReachPoint_CompletesInsideRadius_AndAdvancesCurrent()
         {
-            var map = MapGenerator.Generate(11);
+            var map = DefaultMap();
             var missions = new MissionSystem(11, map);
             var first = missions.Current;
             Assert.IsNotNull(first);
@@ -71,7 +73,7 @@ namespace SFP.Tests
         [Test]
         public void ReachPoint_DoesNotComplete_WhenOutsideRadius()
         {
-            var map = MapGenerator.Generate(11);
+            var map = DefaultMap();
             var missions = new MissionSystem(11, map);
             var first = missions.Current;
 
@@ -89,7 +91,7 @@ namespace SFP.Tests
         [Test]
         public void OutboundComplete_TransitionsToReturning()
         {
-            var map = MapGenerator.Generate(11);
+            var map = DefaultMap();
             var missions = new MissionSystem(11, map);
             Assert.AreEqual(MissionPhase.Outbound, missions.Phase);
 
@@ -113,7 +115,7 @@ namespace SFP.Tests
         [Test]
         public void ReturnComplete_AdvancesToNextRound()
         {
-            var map = MapGenerator.Generate(11);
+            var map = DefaultMap();
             var missions = new MissionSystem(11, map);
             Assert.AreEqual(1, missions.Round);
 
@@ -136,34 +138,28 @@ namespace SFP.Tests
         }
 
         [Test]
-        public void AllTargets_AreInsideMapBorders_AndOverDeepWater()
+        public void AllTargets_AreOverDeepWater()
         {
-            var map = MapGenerator.Generate(5);
+            var map = DefaultMap(5);
             var missions = new MissionSystem(5, map);
             var targets = DrainOutbound(missions);
 
             Assert.Greater(targets.Count, 0);
             foreach (var t in targets)
             {
-                Assert.GreaterOrEqual(t.X, 0f);
-                Assert.LessOrEqual(t.X, map.WorldSizeX);
-                Assert.GreaterOrEqual(t.Z, 0f);
-                Assert.LessOrEqual(t.Z, map.WorldSizeZ);
-
                 float floor = map.GetFloorDepthAt(t.X, t.Z);
                 Assert.GreaterOrEqual(floor, 200f, $"target ({t.X},{t.Z})");
             }
         }
 
         [Test]
-        public void DifferentRounds_ProduceDifferentWaypointOrder()
+        public void DifferentRounds_ProduceDifferentWaypoints()
         {
-            var map = MapGenerator.Generate(42);
+            var map = DefaultMap(42);
             var missions = new MissionSystem(42, map);
             var round1 = DrainOutbound(missions);
 
             var sub = new SubmarineState();
-            // Complete return phase
             while (missions.Round == 1)
             {
                 var m = missions.Current;
@@ -187,7 +183,7 @@ namespace SFP.Tests
                     break;
                 }
             }
-            Assert.IsTrue(anyDifferent, "Round 2 should have different waypoint selection/order than round 1");
+            Assert.IsTrue(anyDifferent, "Round 2 should have different waypoints than round 1");
         }
     }
 }

@@ -142,7 +142,7 @@ namespace SFP.Gameplay
             _profileTex.Apply(false);
         }
 
-        void RebuildProfileTexture(MapData map, SubmarineState sub, float range)
+        void RebuildProfileTexture(ProceduralMapData map, SubmarineState sub, float range)
         {
             if (_profileTex == null)
             {

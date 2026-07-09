@@ -41,7 +41,7 @@ namespace SFP.Presentation
             ApplySweepGlow(state);
         }
 
-        void RebuildBase(MapData map, SubmarineState sub, float range)
+        void RebuildBase(ProceduralMapData map, SubmarineState sub, float range)
         {
             if (_tex == null)
             {

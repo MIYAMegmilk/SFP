@@ -8,7 +8,7 @@ namespace SFP.Simulation
     public sealed class TerrainModel
     {
         public float SeaFloorDepth = 600f;
-        public MapData Map;
+        public ProceduralMapData Map;
 
         public struct Obstacle
         {

@@ -230,7 +230,7 @@ namespace SFP.Presentation
             RebuildMines(bridge, sub, heightScale);
         }
 
-        void BuildTerrainMesh(MapData map, SubmarineState sub, float heightScale, bool floor)
+        void BuildTerrainMesh(ProceduralMapData map, SubmarineState sub, float heightScale, bool floor)
         {
             var vertices = new Vector3[RES * RES];
             // UVs anchor the grid to world coordinates so lines stay glued to terrain features

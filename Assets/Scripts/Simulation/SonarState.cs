@@ -30,6 +30,7 @@ namespace SFP.Simulation
 
         public IReadOnlyList<SonarContact> Contacts => _contacts;
         public float PingProgress => PingInterval > 0 ? _pingTimer / PingInterval : 0f;
+        public bool PingFired;
 
         public float Range => IsPassive ? PassiveRange : ActiveRange;
 
@@ -58,6 +59,7 @@ namespace SFP.Simulation
             if (_pingTimer >= PingInterval)
             {
                 _pingTimer = 0f;
+                PingFired = true;
                 UpdateContacts(sub, terrain, mines, creatures);
             }
         }

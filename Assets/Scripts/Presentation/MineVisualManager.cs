@@ -6,56 +6,80 @@ namespace SFP.Presentation
 {
     public class MineVisualManager : MonoBehaviour
     {
-        readonly List<MineState> _mines = new();
-        readonly List<GameObject> _visuals = new();
-        readonly List<bool> _wasExploded = new();
+        readonly Dictionary<long, GameObject> _visualDict = new();
+        readonly Dictionary<long, bool> _wasExploded = new();
 
         Material _mineMat;
         Material _flashMat;
 
         void Start()
         {
-            var bridge = SimulationBridge.Instance;
-            var mineSystem = bridge != null ? bridge.MineSystem : null;
-            if (mineSystem == null) return;
-
             _mineMat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
             _mineMat.color = new Color(0.25f, 0.12f, 0.1f, 1f);
-
-            foreach (var mine in mineSystem.Mines)
-            {
-                var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                go.name = "Mine";
-                var col = go.GetComponent<Collider>();
-                if (col != null) Destroy(col);
-                go.transform.SetParent(transform, false);
-                go.transform.position = new Vector3(mine.X, -mine.Depth, mine.Z);
-                go.transform.localScale = Vector3.one * 2.5f;
-                go.GetComponent<MeshRenderer>().sharedMaterial = _mineMat;
-
-                _mines.Add(mine);
-                _visuals.Add(go);
-                _wasExploded.Add(mine.Exploded);
-            }
         }
 
         void Update()
         {
-            for (int i = 0; i < _mines.Count; i++)
-            {
-                if (_wasExploded[i] || !_mines[i].Exploded) continue;
+            var bridge = SimulationBridge.Instance;
+            var mineSystem = bridge != null ? bridge.MineSystem : null;
+            if (mineSystem == null) return;
 
-                _wasExploded[i] = true;
-                var visual = _visuals[i];
-                Vector3 pos = visual != null
-                    ? visual.transform.position
-                    : new Vector3(_mines[i].X, -_mines[i].Depth, _mines[i].Z);
-                if (visual != null)
+            var mines = mineSystem.Mines;
+
+            // Track which PersistentIds are still present
+            var currentIds = new HashSet<long>();
+
+            for (int i = 0; i < mines.Count; i++)
+            {
+                var mine = mines[i];
+                long id = mine.PersistentId;
+                currentIds.Add(id);
+
+                // Create visual for new mines
+                if (!_visualDict.ContainsKey(id))
                 {
-                    Destroy(visual);
-                    _visuals[i] = null;
+                    var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    go.name = "Mine";
+                    var col = go.GetComponent<Collider>();
+                    if (col != null) Destroy(col);
+                    go.transform.SetParent(transform, false);
+                    go.transform.position = new Vector3(mine.X, -mine.Depth, mine.Z);
+                    go.transform.localScale = Vector3.one * 2.5f;
+                    go.GetComponent<MeshRenderer>().sharedMaterial = _mineMat;
+
+                    _visualDict[id] = go;
+                    _wasExploded[id] = false;
                 }
-                SpawnFlash(pos);
+
+                // Handle explosion flashes
+                if (!_wasExploded[id] && mine.Exploded)
+                {
+                    _wasExploded[id] = true;
+                    if (_visualDict.TryGetValue(id, out var visual) && visual != null)
+                    {
+                        Vector3 pos = visual.transform.position;
+                        Destroy(visual);
+                        _visualDict[id] = null;
+                        SpawnFlash(pos);
+                    }
+                }
+            }
+
+            // Destroy visuals for mines no longer present
+            var toRemove = new List<long>();
+            foreach (var kvp in _visualDict)
+            {
+                if (!currentIds.Contains(kvp.Key))
+                {
+                    if (kvp.Value != null)
+                        Destroy(kvp.Value);
+                    toRemove.Add(kvp.Key);
+                }
+            }
+            foreach (var id in toRemove)
+            {
+                _visualDict.Remove(id);
+                _wasExploded.Remove(id);
             }
         }
 

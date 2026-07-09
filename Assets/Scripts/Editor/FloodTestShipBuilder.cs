@@ -297,6 +297,7 @@ public static class FloodTestShipBuilder
         playerCam.backgroundColor = new Color(0.01f, 0.04f, 0.1f);
         playerCam.clearFlags = CameraClearFlags.SolidColor;
         playerCam.nearClipPlane = 0.1f;
+        camGo.AddComponent<AudioListener>();
 
         bridgeGo.AddComponent<CameraModeSwitcher>();
 
@@ -456,6 +457,8 @@ public static class FloodTestShipBuilder
             sd.ActiveRange = 500f;
             sd.PowerConsumption = 100f;
             sd.Tier = 1;
+            sonarGo.AddComponent<AudioSource>();
+            sonarGo.AddComponent<SonarAudio>();
             PlaceDeviceConsole(sonarGo, new Vector3(-1.8f, -2.3f, 2.5f), new Vector3(1.2f, 1.4f, 0.4f), new Color(0.1f, 0.9f, 0.3f));
         }
 
@@ -474,6 +477,8 @@ public static class FloodTestShipBuilder
             t2Sonar.ActiveRange = 500f;
             t2Sonar.PowerConsumption = 120f;
             t2Sonar.Tier = 2;
+            t2Go.AddComponent<AudioSource>();
+            t2Go.AddComponent<SonarAudio>();
             t2Go.AddComponent<DeviceDegradation>().Compartment = compDefs[10];
             PlaceDeviceConsole(t2Go, new Vector3(0f, -2.3f, 2.5f), new Vector3(1.6f, 1.4f, 0.4f), new Color(0.1f, 0.85f, 0.75f));
 
@@ -487,6 +492,8 @@ public static class FloodTestShipBuilder
             t3Sonar.ActiveRange = 500f;
             t3Sonar.PowerConsumption = 150f;
             t3Sonar.Tier = 3;
+            t3Go.AddComponent<AudioSource>();
+            t3Go.AddComponent<SonarAudio>();
             t3Go.AddComponent<DeviceDegradation>().Compartment = compDefs[11];
             PlaceDeviceConsole(t3Go, new Vector3(1.8f, -2.3f, 2.5f), new Vector3(1.6f, 1.4f, 0.4f), new Color(0.3f, 0.7f, 1f));
 

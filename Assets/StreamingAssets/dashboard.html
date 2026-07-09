@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SFP Status</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Courier New',monospace;background:#0a0e14;color:#c8d0d8;font-size:13px;padding:8px;max-width:480px;margin:0 auto}
+h1{font-size:15px;color:#4ec9b0;text-align:center;padding:6px 0;border-bottom:1px solid #1e2a36}
+.stale{background:#3a1a1a;color:#ff6b6b;text-align:center;padding:4px;font-weight:bold;display:none}
+.section{border:1px solid #1e2a36;border-radius:4px;margin:6px 0;padding:6px 8px}
+.section-title{font-size:12px;color:#569cd6;font-weight:bold;margin-bottom:4px;text-transform:uppercase;letter-spacing:1px}
+.row{display:flex;justify-content:space-between;padding:1px 0;align-items:center}
+.label{color:#808890}
+.val{color:#d4d4d4;text-align:right}
+.badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold;cursor:pointer;user-select:none}
+.on{background:#1a3a1a;color:#4ec9b0}
+.off{background:#2a2020;color:#666}
+.bar-bg{background:#1a1e24;height:10px;border-radius:3px;overflow:hidden;margin:2px 0}
+.bar-fill{height:100%;border-radius:3px;transition:width .3s}
+.compass{width:80px;height:80px;border:2px solid #1e2a36;border-radius:50%;margin:4px auto;position:relative}
+.compass-n{position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:10px;color:#ff4444;font-weight:bold}
+.compass-needle{position:absolute;top:50%;left:50%;width:2px;height:32px;background:linear-gradient(#4ec9b0 50%,#333 50%);transform-origin:50% 0%;border-radius:1px}
+.mission-card{background:#0f1520;border:1px solid #2a5090;border-radius:4px;padding:8px;margin:4px 0}
+.mission-label{color:#569cd6;font-weight:bold;font-size:13px}
+.mission-dist{font-size:18px;color:#4ec9b0;font-weight:bold;text-align:center;padding:4px 0}
+.sonar-wrap{text-align:center;position:relative}
+.sonar-canvas{border-radius:50%;image-rendering:pixelated;width:280px;height:280px}
+.sonar-info{font-size:11px;color:#808890;margin-top:4px}
+details{cursor:pointer}
+details>summary{list-style:none;display:flex;justify-content:space-between;align-items:center}
+details>summary::-webkit-details-marker{display:none}
+details>summary::after{content:'▸';color:#569cd6;font-size:10px}
+details[open]>summary::after{content:'▾'}
+.btn-row{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0}
+.btn{background:#1a2030;border:1px solid #2a3a50;color:#c8d0d8;padding:6px 10px;border-radius:4px;font-family:inherit;font-size:12px;cursor:pointer;user-select:none;flex:1;text-align:center;min-width:50px}
+.btn:active{background:#2a3a50}
+.btn.danger{border-color:#5a2020;color:#ff6b6b}
+.btn.danger:active{background:#3a1a1a}
+.btn.active{background:#1a3a1a;border-color:#2a5a3a;color:#4ec9b0}
+.slider-row{display:flex;align-items:center;gap:6px;margin:3px 0}
+.slider-row label{color:#808890;font-size:11px;min-width:50px}
+.slider-row input[type=range]{flex:1;accent-color:#4ec9b0}
+.slider-row .slider-val{color:#d4d4d4;font-size:12px;min-width:40px;text-align:right}
+.stepper{display:flex;align-items:center;gap:2px}
+.stepper .btn{padding:4px 8px;min-width:30px;flex:0}
+.deck-grid{display:grid;gap:2px;margin:4px 0}
+.deck-cell{position:relative;height:36px;border-radius:2px;overflow:hidden;font-size:10px;display:flex;align-items:center;justify-content:center;color:#ccc;background:#0a0e14;border:1px solid #1a1e24}
+.deck-water{position:absolute;bottom:0;left:0;right:0;background:rgba(30,100,200,0.5);transition:height .3s}
+.deck-fire{position:absolute;top:0;left:0;right:0;background:rgba(255,60,30,0.7);transition:height .3s}
+.deck-label{position:relative;z-index:1;text-shadow:0 0 3px #000}
+.reactor-card{background:#0f1520;border:1px solid #1e2a36;border-radius:4px;padding:6px;margin:4px 0}
+.temp-bar{position:relative;height:14px;background:#1a1e24;border-radius:3px;overflow:hidden;margin:3px 0}
+.temp-fill{height:100%;border-radius:3px;transition:width .3s}
+.temp-mark{position:absolute;top:0;bottom:0;width:2px;background:#4ec9b0}
+.melt-mark{position:absolute;top:0;bottom:0;width:2px;background:#ff4444}
+.profile-canvas{width:100%;height:120px;border-radius:4px;display:block;margin:4px 0}
+.terrain3d-canvas{width:100%;height:220px;border-radius:4px;display:block;margin:4px 0}
+</style>
+</head>
+<body>
+<h1>SFP SUBMARINE STATUS</h1>
+<div class="stale" id="stale">CONNECTION LOST</div>
+
+<div class="section">
+  <div class="section-title">Sonar</div>
+  <div class="sonar-wrap">
+    <canvas id="sonar" class="sonar-canvas" width="96" height="96"></canvas>
+    <div class="sonar-info" id="sonar-info">NO SIGNAL</div>
+  </div>
+</div>
+
+<div class="section">
+  <details open>
+    <summary><span class="section-title" style="margin:0">Side Profile</span></summary>
+    <canvas id="profile" class="profile-canvas" width="460" height="160"></canvas>
+    <div class="sonar-info" id="profile-info">FORWARD TERRAIN CROSS-SECTION</div>
+  </details>
+</div>
+
+<div class="section">
+  <details open>
+    <summary><span class="section-title" style="margin:0">3D Terrain</span></summary>
+    <canvas id="terrain3d" class="terrain3d-canvas" width="460" height="300"></canvas>
+  </details>
+</div>
+
+<div class="section">
+  <div class="section-title">Helm Control</div>
+  <div class="btn-row">
+    <div class="btn danger" onclick="cmd('stop')">STOP</div>
+    <div class="btn danger" onclick="cmd('surface')">SURFACE</div>
+    <div class="btn" id="btn-ap" onclick="toggleAP()">AP OFF</div>
+    <div class="btn" id="btn-dh" onclick="toggleDH()">DH OFF</div>
+  </div>
+  <div class="btn-row">
+    <div class="btn" onclick="cmd('navigate')">NAV TO MISSION</div>
+  </div>
+  <div class="slider-row">
+    <label>Throttle</label>
+    <input type="range" id="sl-throttle" min="-100" max="100" value="0" step="5">
+    <span class="slider-val" id="sl-throttle-val">0%</span>
+  </div>
+  <div class="slider-row">
+    <label>Depth</label>
+    <input type="range" id="sl-depth" min="0" max="500" value="200" step="10">
+    <span class="slider-val" id="sl-depth-val">200m</span>
+  </div>
+  <div class="row">
+    <span class="label">Heading</span>
+    <div class="stepper">
+      <div class="btn" onclick="adjHeading(-45)">-45</div>
+      <div class="btn" onclick="adjHeading(-5)">-5</div>
+      <span class="val" id="hdg-val" style="min-width:40px;text-align:center">0°</span>
+      <div class="btn" onclick="adjHeading(5)">+5</div>
+      <div class="btn" onclick="adjHeading(45)">+45</div>
+    </div>
+  </div>
+  <div class="row">
+    <span class="label">Speed</span>
+    <div class="stepper">
+      <div class="btn" onclick="adjSpeed(-1)">-1</div>
+      <span class="val" id="spd-set-val" style="min-width:50px;text-align:center">0 m/s</span>
+      <div class="btn" onclick="adjSpeed(1)">+1</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="nav-section">
+  <div class="section-title">Navigation</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="compass" id="compass">
+      <div class="compass-n">N</div>
+      <div class="compass-needle" id="needle"></div>
+    </div>
+    <div style="flex:1">
+      <div class="row"><span class="label">HDG</span><span class="val" id="heading">---</span></div>
+      <div class="row"><span class="label">SPD</span><span class="val" id="speed">---</span></div>
+      <div class="row"><span class="label">POS</span><span class="val" id="position">---</span></div>
+      <div class="row"><span class="label">RDR</span><span class="val" id="rudder">---</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Depth</div>
+  <div class="row"><span class="label">Current</span><span class="val" id="depth">---</span></div>
+  <div class="bar-bg"><div class="bar-fill" id="depth-bar" style="width:0;background:#4ec9b0"></div></div>
+  <div class="row"><span class="label">Target</span><span class="val" id="depth-target">---</span></div>
+  <div class="row"><span class="label">V.Speed</span><span class="val" id="vspeed">---</span></div>
+</div>
+
+<div class="section">
+  <details open>
+    <summary><span class="section-title" style="margin:0">Reactor</span></summary>
+    <div id="reactor-detail"></div>
+  </details>
+</div>
+
+<div class="section">
+  <details>
+    <summary><span class="section-title" style="margin:0">Power Grid</span></summary>
+    <div class="row" style="margin-top:4px"><span class="label">Prod / Cons</span><span class="val" id="power-summary">---</span></div>
+    <div class="bar-bg"><div class="bar-fill" id="power-bar" style="width:0;background:#4ec9b0"></div></div>
+    <div id="batteries"></div>
+    <div id="junctions"></div>
+  </details>
+</div>
+
+<div class="section">
+  <details open>
+    <summary><span class="section-title" style="margin:0">Ship Status</span></summary>
+    <div id="deck-view" style="margin-top:4px"></div>
+  </details>
+</div>
+
+<div class="section" id="mission-section">
+  <div class="section-title">Mission</div>
+  <div class="mission-card" id="mission-card"></div>
+</div>
+
+<div style="text-align:center;color:#444;font-size:10px;padding:8px">
+  <span id="update-time">--</span>
+</div>
+
+<script>
+var staleCount = 0;
+var $ = function(id) { return document.getElementById(id); };
+var lastData = null;
+var apState = false, dhState = false;
+var desiredHeading = 0, desiredSpeed = 0;
+var sliderTouching = {};
+
+function cmd(c) {
+  fetch('/api/cmd', {method:'POST', body:c}).catch(function(){});
+}
+
+function toggleAP() {
+  apState = !apState;
+  cmd('autopilot ' + (apState ? 'on' : 'off'));
+}
+function toggleDH() {
+  dhState = !dhState;
+  cmd('depthhold ' + (dhState ? 'on' : 'off'));
+}
+function adjHeading(delta) {
+  desiredHeading = ((desiredHeading + delta) % 360 + 360) % 360;
+  $('hdg-val').textContent = desiredHeading.toFixed(0) + '°';
+  cmd('heading ' + desiredHeading.toFixed(0));
+}
+function adjSpeed(delta) {
+  desiredSpeed = Math.max(0, desiredSpeed + delta);
+  $('spd-set-val').textContent = desiredSpeed.toFixed(0) + ' m/s';
+  cmd('speed ' + desiredSpeed.toFixed(1));
+}
+
+// Slider setup
+function setupSlider(id, onSend) {
+  var el = $(id);
+  el.addEventListener('touchstart', function() { sliderTouching[id] = true; });
+  el.addEventListener('touchend', function() { sliderTouching[id] = false; onSend(el); });
+  el.addEventListener('mousedown', function() { sliderTouching[id] = true; });
+  el.addEventListener('mouseup', function() { sliderTouching[id] = false; onSend(el); });
+  el.addEventListener('input', function() {
+    if (id === 'sl-throttle') $('sl-throttle-val').textContent = el.value + '%';
+    if (id === 'sl-depth') $('sl-depth-val').textContent = el.value + 'm';
+  });
+}
+setupSlider('sl-throttle', function(el) { cmd('throttle ' + (parseInt(el.value) / 100).toFixed(2)); });
+setupSlider('sl-depth', function(el) { cmd('depth ' + el.value); });
+
+// --- Sonar ---
+var sonarGrid = null, sonarRes = 96, sonarBearing = null;
+var sonarPingProgress = 0, sonarPingInterval = 3, sonarRange = 500;
+var sonarContacts = [], sonarHasPower = false, sonarLastPollTime = 0;
+var sonarCtx = $('sonar').getContext('2d');
+var sonarImgData = sonarCtx.createImageData(96, 96);
+var cellColors = [[0,0,0,0],[0,31,8,217],[230,64,31,242],[38,115,242,230],[230,191,38,230]];
+var contactColors = [[0,200,80],[255,180,40],[255,51,38]];
+
+function buildBearingLUT(res) {
+  var lut = new Float32Array(res * res);
+  for (var j = 0; j < res; j++) { var v = (j/res-0.5)*2; for (var i = 0; i < res; i++) {
+    var u = (i/res-0.5)*2; var deg = Math.atan2(u,v)*180/Math.PI; if(deg<0)deg+=360; lut[j*res+i]=deg;
+  }} return lut;
+}
+function decodeRLE(str, sz) {
+  var a = new Uint8Array(sz), m={c:0,o:1,w:2,a:3,d:4}, p=0, i=0;
+  while(i<str.length){var cl=m[str[i++]]; if(cl===undefined)continue; var n='';
+    while(i<str.length&&str[i]>='0'&&str[i]<='9')n+=str[i++]; var cnt=parseInt(n)||1;
+    for(var k=0;k<cnt&&p<sz;k++)a[p++]=cl;} return a;
+}
+function renderSonar() {
+  if(!sonarGrid){sonarCtx.clearRect(0,0,96,96);return;}
+  if(!sonarBearing||sonarBearing.length!==sonarRes*sonarRes)sonarBearing=buildBearingLUT(sonarRes);
+  var data=sonarImgData.data, total=sonarRes*sonarRes;
+  if(sonarHasPower){
+    var now=performance.now()/1000, elapsed=now-sonarLastPollTime;
+    var progress=sonarPingInterval>0?sonarPingProgress+elapsed/sonarPingInterval:0;
+    var sweepDeg=(progress%1)*360, fadeDeg=360*1.0/Math.max(0.5,sonarPingInterval);
+    for(var i=0;i<total;i++){var c=cellColors[sonarGrid[i]];
+      if(c[3]===0){data[i*4]=data[i*4+1]=data[i*4+2]=data[i*4+3]=0;continue;}
+      var lag=sweepDeg-sonarBearing[i]; if(lag<0)lag+=360;
+      var glow=1.25*(1-lag/fadeDeg); if(glow<0)glow=0;
+      data[i*4]=(c[0]*glow>255?255:c[0]*glow)|0; data[i*4+1]=(c[1]*glow>255?255:c[1]*glow)|0;
+      data[i*4+2]=(c[2]*glow>255?255:c[2]*glow)|0; data[i*4+3]=c[3];}
+  } else {
+    for(var i=0;i<total;i++){var c=cellColors[sonarGrid[i]];
+      if(c[3]===0){data[i*4]=data[i*4+1]=data[i*4+2]=data[i*4+3]=0;continue;}
+      data[i*4]=(c[0]*0.3)|0;data[i*4+1]=(c[1]*0.3)|0;data[i*4+2]=(c[2]*0.3)|0;data[i*4+3]=c[3];}
+  }
+  // Contacts
+  if(sonarHasPower){var sweepDeg2=(((sonarPingProgress+(performance.now()/1000-sonarLastPollTime)/sonarPingInterval)%1)*360);
+    var fadeDeg2=360/Math.max(0.5,sonarPingInterval);
+    for(var ci=0;ci<sonarContacts.length;ci++){var ct=sonarContacts[ci];var dist=ct.distance/sonarRange;if(dist>1)continue;
+      var lag2=((sweepDeg2-ct.bearing)%360+360)%360;var glow2=1-lag2/fadeDeg2;if(glow2<=0)continue;
+      var rad=ct.bearing*Math.PI/180;
+      var px=Math.round((Math.sin(rad)*dist*0.5+0.5)*(sonarRes-1));
+      var py=Math.round((Math.cos(rad)*dist*0.5+0.5)*(sonarRes-1));
+      var cc=contactColors[ct.type]||contactColors[0];
+      for(var dy=-1;dy<=1;dy++)for(var dx=-1;dx<=1;dx++){var x=px+dx,y=py+dy;
+        if(x<0||x>=sonarRes||y<0||y>=sonarRes)continue;var di=(y*sonarRes+x)*4;
+        data[di]=Math.min(255,data[di]+cc[0]*glow2)|0;data[di+1]=Math.min(255,data[di+1]+cc[1]*glow2)|0;
+        data[di+2]=Math.min(255,data[di+2]+cc[2]*glow2)|0;data[di+3]=255;}}}
+  // Center marker
+  var center=(sonarRes/2)*sonarRes+sonarRes/2,ci4=center*4;
+  data[ci4]=51;data[ci4+1]=255;data[ci4+2]=255;data[ci4+3]=255;
+  [-1,1,-sonarRes,sonarRes].forEach(function(o){var ni=(center+o)*4;data[ni]=51;data[ni+1]=255;data[ni+2]=255;data[ni+3]=200;});
+  sonarCtx.putImageData(sonarImgData,0,0);
+}
+var frameCount = 0;
+function sonarLoop(){
+  if(!document.hidden){
+    renderSonar();
+    // Re-render 3D at lower rate (every 30 frames ≈ 2Hz) to track heading smoothly
+    if(++frameCount % 30 === 0 && depthGridData) render3D();
+  }
+  requestAnimationFrame(sonarLoop);
+}
+sonarLoop();
+
+// --- Side Profile ---
+var profileCtx = $('profile').getContext('2d');
+var profileData = null, profileDepthMin = 0, profileDepthMax = 0, profileSamples = 0;
+
+function decodeBase64(str) {
+  var bin = atob(str);
+  var arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+function renderProfile() {
+  var cv = $('profile'), ctx = profileCtx;
+  var w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#060a10';
+  ctx.fillRect(0, 0, w, h);
+  if (!profileData || !lastData || !lastData.sub) return;
+
+  var span = profileDepthMax - profileDepthMin;
+  if (span < 1) return;
+  var n = profileSamples;
+  function dToY(d) { return (d - profileDepthMin) / span * h; }
+
+  // Floor fill
+  ctx.beginPath();
+  ctx.moveTo(0, dToY(profileDepthMin + (profileData[0] / 255) * span));
+  for (var i = 1; i < n; i++) {
+    var fd = profileDepthMin + (profileData[i * 2] / 255) * span;
+    ctx.lineTo(i / (n - 1) * w, dToY(fd));
+  }
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+  ctx.fillStyle = 'rgba(80,55,30,0.7)';
+  ctx.fill();
+
+  // Floor outline (green phosphor)
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var fd = profileDepthMin + (profileData[i * 2] / 255) * span;
+    var x = i / (n - 1) * w;
+    if (i === 0) ctx.moveTo(x, dToY(fd)); else ctx.lineTo(x, dToY(fd));
+  }
+  ctx.strokeStyle = '#0c8'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Ceiling fill + outline
+  var hasCeil = false;
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var cb = profileData[i * 2 + 1];
+    if (cb > 0) {
+      var cd = profileDepthMin + (cb / 255) * span;
+      var x = i / (n - 1) * w;
+      if (!hasCeil) { ctx.moveTo(x, dToY(cd)); hasCeil = true; }
+      else ctx.lineTo(x, dToY(cd));
+    }
+  }
+  if (hasCeil) {
+    ctx.lineTo(w, 0); ctx.lineTo(0, 0); ctx.closePath();
+    ctx.fillStyle = 'rgba(80,55,30,0.7)'; ctx.fill();
+    // Ceiling outline
+    ctx.beginPath();
+    for (var i = 0; i < n; i++) {
+      var cb = profileData[i * 2 + 1];
+      if (cb > 0) {
+        var cd = profileDepthMin + (cb / 255) * span;
+        var x = i / (n - 1) * w;
+        if (i === 0 || profileData[(i-1)*2+1] === 0) ctx.moveTo(x, dToY(cd));
+        else ctx.lineTo(x, dToY(cd));
+      }
+    }
+    ctx.strokeStyle = '#0c8'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // Sub depth line
+  var subY = dToY(lastData.sub.depth);
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(0, subY); ctx.lineTo(w, subY);
+  ctx.strokeStyle = '#4ec9b0'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Sub marker
+  ctx.fillStyle = '#4ec9b0';
+  ctx.beginPath(); ctx.arc(4, subY, 4, 0, Math.PI * 2); ctx.fill();
+
+  // Depth labels
+  ctx.fillStyle = '#808890'; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+  ctx.fillText(profileDepthMin.toFixed(0) + 'm', 2, 11);
+  ctx.textAlign = 'left';
+  ctx.fillText(profileDepthMax.toFixed(0) + 'm', 2, h - 3);
+  ctx.textAlign = 'right';
+  ctx.fillText(lastData.sub.depth.toFixed(0) + 'm', w - 2, subY - 4);
+
+  // Range label
+  ctx.textAlign = 'right'; ctx.fillText(sonarRange.toFixed(0) + 'm', w - 2, 11);
+}
+
+// --- 3D Terrain ---
+var t3dCtx = $('terrain3d').getContext('2d');
+var depthGridData = null, depthGridRes = 0, depthGridMin = 0, depthGridMax = 0;
+var t3dYaw = 0, t3dTilt = 0.55, t3dManual = false;
+var t3dDragging = false, t3dLastX = 0, t3dLastY = 0;
+
+(function(){
+  var cv = $('terrain3d');
+  function onStart(x, y) { t3dDragging = true; t3dLastX = x; t3dLastY = y; t3dManual = true; }
+  function onMove(x, y) {
+    if (!t3dDragging) return;
+    var dx = x - t3dLastX, dy = y - t3dLastY;
+    t3dYaw += dx * 0.8;
+    t3dTilt = Math.max(0.15, Math.min(0.9, t3dTilt + dy * 0.004));
+    t3dLastX = x; t3dLastY = y;
+    render3D();
+  }
+  function onEnd() { t3dDragging = false; }
+  cv.addEventListener('mousedown', function(e) { onStart(e.clientX, e.clientY); });
+  window.addEventListener('mousemove', function(e) { onMove(e.clientX, e.clientY); });
+  window.addEventListener('mouseup', onEnd);
+  cv.addEventListener('touchstart', function(e) {
+    if (e.touches.length === 1) { var t = e.touches[0]; onStart(t.clientX, t.clientY); e.preventDefault(); }
+  }, {passive:false});
+  cv.addEventListener('touchmove', function(e) {
+    if (e.touches.length === 1) { var t = e.touches[0]; onMove(t.clientX, t.clientY); e.preventDefault(); }
+  }, {passive:false});
+  cv.addEventListener('touchend', onEnd);
+  // Double-tap to reset to heading-follow
+  var lastTap = 0;
+  cv.addEventListener('touchend', function(e) {
+    var now = Date.now();
+    if (now - lastTap < 300) { t3dManual = false; t3dTilt = 0.55; render3D(); }
+    lastTap = now;
+  });
+  cv.addEventListener('dblclick', function() { t3dManual = false; t3dTilt = 0.55; render3D(); });
+})();
+
+function render3D() {
+  var cv = $('terrain3d'), ctx = t3dCtx;
+  var w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#060a10';
+  ctx.fillRect(0, 0, w, h);
+  if (!depthGridData || !lastData || !lastData.sub) return;
+
+  var res = depthGridRes;
+  var span = depthGridMax - depthGridMin;
+  if (span < 1) return;
+  var subD = lastData.sub.depth;
+  var heading = lastData.sub.heading || 0;
+  var yawDeg = t3dManual ? t3dYaw : -heading;
+  var headRad = yawDeg * Math.PI / 180;
+  var cosH = Math.cos(headRad), sinH = Math.sin(headRad);
+
+  var scaleXZ = w * 0.32;
+  var tilt = t3dTilt;
+  var hScale = h * 0.25;
+  var cx = w / 2, cy = h * 0.45;
+
+  function project(u, v, hVal) {
+    var ru = u * cosH - v * sinH;
+    var rv = u * sinH + v * cosH;
+    return [cx + ru * scaleXZ, cy + rv * scaleXZ * tilt - hVal * hScale];
+  }
+
+  function getH(i, j) {
+    var d = depthGridMin + (depthGridData[j * res + i] / 255) * span;
+    return (subD - d) / span;
+  }
+
+  // Draw filled terrain strips back-to-front (sorted by rotated V)
+  // Collect row indices and sort by screen depth
+  var rows = [];
+  for (var j = 0; j < res; j++) {
+    var v = (j / res - 0.5) * 2;
+    var screenDepth = v * cosH + 0 * sinH;
+    rows.push({j: j, depth: screenDepth});
+  }
+  rows.sort(function(a, b) { return a.depth - b.depth; });
+
+  var step = 2;
+  for (var ri = 0; ri < rows.length; ri += step) {
+    var j = rows[ri].j;
+    var v = (j / res - 0.5) * 2;
+
+    // Draw filled strip between this row and next
+    if (ri < rows.length - 1) {
+      var j2 = rows[ri + 1].j;
+      var v2 = (j2 / res - 0.5) * 2;
+      for (var i = 0; i < res - step; i += step) {
+        var u1 = (i / res - 0.5) * 2;
+        var u2 = ((i + step) / res - 0.5) * 2;
+        var h00 = getH(i, j), h10 = getH(i + step, j);
+        var h01 = getH(i, j2), h11 = getH(i + step, j2);
+        var p00 = project(u1, v, h00), p10 = project(u2, v, h10);
+        var p01 = project(u1, v2, h01), p11 = project(u2, v2, h11);
+        var avgH = (h00 + h10 + h01 + h11) * 0.25;
+        // Color: green=safe(deep), yellow=close, red=above sub
+        var r, g, b;
+        if (avgH < -0.1) { r = 30; g = 80; b = 50; } // floor well below
+        else if (avgH < 0.05) { r = 200; g = 180; b = 40; } // close to sub depth
+        else { r = 200; g = 50; b = 30; } // floor above sub = danger
+        var bright = 0.3 + Math.max(0, Math.min(0.7, (avgH + 0.5)));
+        ctx.fillStyle = 'rgba(' + (r*bright|0) + ',' + (g*bright|0) + ',' + (b*bright|0) + ',0.85)';
+        ctx.beginPath();
+        ctx.moveTo(p00[0], p00[1]); ctx.lineTo(p10[0], p10[1]);
+        ctx.lineTo(p11[0], p11[1]); ctx.lineTo(p01[0], p01[1]);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+
+    // Draw wireframe row line
+    ctx.beginPath();
+    for (var i = 0; i < res; i += 1) {
+      var u = (i / res - 0.5) * 2;
+      var hv = getH(i, j);
+      var p = project(u, v, hv);
+      if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+    }
+    ctx.strokeStyle = 'rgba(0,200,100,0.3)'; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  // Column wireframe lines
+  var cols = [];
+  for (var i = 0; i < res; i++) {
+    var u = (i / res - 0.5) * 2;
+    cols.push(i);
+  }
+  for (var ci = 0; ci < cols.length; ci += 2) {
+    var i = cols[ci];
+    var u = (i / res - 0.5) * 2;
+    ctx.beginPath();
+    for (var ri2 = 0; ri2 < rows.length; ri2++) {
+      var j = rows[ri2].j;
+      var v = (j / res - 0.5) * 2;
+      var hv = getH(i, j);
+      var p = project(u, v, hv);
+      if (ri2 === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+    }
+    ctx.strokeStyle = 'rgba(0,200,100,0.2)'; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  // Sub marker at center
+  var cp = project(0, 0, 0);
+  ctx.fillStyle = '#4ec9b0';
+  ctx.beginPath(); ctx.arc(cp[0], cp[1], 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#0a0e14';
+  ctx.beginPath(); ctx.arc(cp[0], cp[1], 2, 0, Math.PI * 2); ctx.fill();
+
+  // Heading indicator
+  var fp = project(0, -0.15, 0);
+  ctx.beginPath(); ctx.moveTo(cp[0], cp[1]); ctx.lineTo(fp[0], fp[1]);
+  ctx.strokeStyle = '#4ec9b0'; ctx.lineWidth = 2; ctx.stroke();
+
+  // Labels
+  ctx.fillStyle = '#808890'; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('3D TERRAIN' + (t3dManual ? ' [MANUAL]' : ''), 4, 12);
+  ctx.textAlign = 'right';
+  ctx.fillText('HDG ' + heading.toFixed(0) + '°', w - 4, 12);
+  if (t3dManual) { ctx.fillStyle='#569cd6'; ctx.textAlign='center'; ctx.fillText('double-tap to reset', w/2, h-4); }
+}
+
+// --- Helpers ---
+function setBadge(el, on, label) {
+  el.className = 'badge ' + (on ? 'on' : 'off');
+  el.textContent = label + ' ' + (on ? 'ON' : 'OFF');
+}
+
+// --- Reactor detail ---
+function renderReactors(reactors) {
+  var html = '';
+  reactors.forEach(function(r, i) {
+    var tempPct = r.meltdownTemp > 0 ? Math.min(100, r.temp / r.meltdownTemp * 100) : 0;
+    var optPct = r.meltdownTemp > 0 ? (r.optimalTemp / r.meltdownTemp * 100) : 50;
+    var tempColor = r.meltdown ? '#ff4444' : r.temp > r.optimalTemp * 1.5 ? '#ffa500' : '#4ec9b0';
+    var statusText = r.exploded ? 'EXPLODED' : r.meltdown ? 'MELTDOWN ' + (r.meltdownFuse > 0 ? ((1-r.meltdownProgress/r.meltdownFuse)*r.meltdownFuse).toFixed(0) + 's' : '') : 'NOMINAL';
+    var statusColor = r.exploded ? '#ff4444' : r.meltdown ? '#ff4444' : '#4ec9b0';
+    html += '<div class="reactor-card">';
+    html += '<div class="row"><span class="label">Reactor ' + i + '</span><span style="color:' + statusColor + '">' + statusText + '</span></div>';
+    html += '<div class="row"><span class="label">Output</span><span class="val">' + r.output.toFixed(0) + ' / ' + r.maxOutput.toFixed(0) + 'W</span></div>';
+    html += '<div class="row"><span class="label">Temperature</span><span class="val" style="color:' + tempColor + '">' + r.temp.toFixed(1) + '°</span></div>';
+    html += '<div class="temp-bar"><div class="temp-fill" style="width:' + tempPct + '%;background:' + tempColor + '"></div>';
+    html += '<div class="temp-mark" style="left:' + optPct + '%"></div>';
+    html += '<div class="melt-mark" style="left:100%"></div></div>';
+    html += '<div class="row"><span class="label">Fission</span><span class="val">' + (r.fissionRate * 100).toFixed(0) + '%</span></div>';
+    html += '<div class="row"><span class="label">Fuel</span><span class="val">' + r.fuel.toFixed(1) + '%</span></div>';
+    html += '<div class="bar-bg"><div class="bar-fill" style="width:' + r.fuel + '%;background:' + (r.fuel > 20 ? '#4ec9b0' : '#ff4444') + '"></div></div>';
+    html += '<div class="row"><span class="label">Condition</span><span class="val">' + r.condition.toFixed(0) + '%</span></div>';
+    html += '</div>';
+  });
+  $('reactor-detail').innerHTML = html;
+}
+
+// --- Deck grid (status monitor style) ---
+function renderDeckView(comps) {
+  if (!comps || !comps.length) return;
+  // Group by deck (floorY descending = top deck first), sort by shipX
+  var decks = {};
+  comps.forEach(function(c) {
+    var key = c.floorY.toFixed(1);
+    if (!decks[key]) decks[key] = [];
+    decks[key].push(c);
+  });
+  var sortedKeys = Object.keys(decks).sort(function(a,b) { return parseFloat(b) - parseFloat(a); });
+  sortedKeys.forEach(function(k) { decks[k].sort(function(a,b) { return a.shipX - b.shipX; }); });
+  var maxCols = 0;
+  sortedKeys.forEach(function(k) { if (decks[k].length > maxCols) maxCols = decks[k].length; });
+
+  var html = '<div class="deck-grid" style="grid-template-columns:repeat(' + maxCols + ',1fr)">';
+  sortedKeys.forEach(function(k) {
+    var row = decks[k];
+    row.forEach(function(c) {
+      var waterH = (c.fraction * 100).toFixed(0);
+      var fireH = (c.fire * 100).toFixed(0);
+      var bg = '#0a0e14';
+      if (c.oxygen < 0.15) bg = '#2a1a00';
+      else if (c.oxygen < 0.5) bg = '#1a1a00';
+      var borderColor = c.fire > 0.5 ? '#ff4444' : c.fraction > 0.5 ? '#3060c0' : '#1a1e24';
+      html += '<div class="deck-cell" style="background:' + bg + ';border-color:' + borderColor + '">';
+      html += '<div class="deck-water" style="height:' + waterH + '%"></div>';
+      if (c.fire > 0.01) html += '<div class="deck-fire" style="height:' + fireH + '%"></div>';
+      html += '<div class="deck-label">' + c.name.replace(/^(Corridor|Living|Ballast_)/, function(m) {
+        return m === 'Corridor' ? 'Cor' : m === 'Living' ? 'Liv' : 'Bal_';
+      }) + '</div></div>';
+    });
+    // Pad row
+    for (var p = row.length; p < maxCols; p++) html += '<div></div>';
+  });
+  html += '</div>';
+  $('deck-view').innerHTML = html;
+}
+
+// --- Main update ---
+function update(d) {
+  staleCount = 0;
+  lastData = d;
+  $('stale').style.display = 'none';
+
+  // Sonar
+  if (d.sonar) {
+    sonarHasPower = d.sonar.hasPower;
+    sonarRange = d.sonar.range || 500;
+    sonarPingProgress = d.sonar.pingProgress || 0;
+    sonarPingInterval = d.sonar.pingInterval || 3;
+    sonarRes = d.sonar.res || 96;
+    sonarContacts = d.sonar.contacts || [];
+    sonarLastPollTime = performance.now() / 1000;
+    if (d.sonar.grid) {
+      sonarGrid = decodeRLE(d.sonar.grid, sonarRes * sonarRes);
+      sonarBearing = null;
+    }
+    var mode = d.sonar.passive ? 'PASSIVE' : 'ACTIVE';
+    $('sonar-info').textContent = mode + ' ' + d.sonar.range.toFixed(0) + 'm' + (d.sonar.hasPower ? '' : ' [NO POWER]');
+
+    // Side profile
+    if (d.sonar.profile) {
+      try {
+        profileData = decodeBase64(d.sonar.profile);
+        profileSamples = d.sonar.profileSamples || 64;
+        profileDepthMin = d.sonar.profileDepthMin || 0;
+        profileDepthMax = d.sonar.profileDepthMax || 1;
+        renderProfile();
+      } catch(e) { console.error('profile:', e); }
+    }
+
+    // 3D depth grid
+    if (d.sonar.depthGrid) {
+      try {
+        depthGridData = decodeBase64(d.sonar.depthGrid);
+        depthGridRes = d.sonar.depthGridRes || 32;
+        depthGridMin = d.sonar.depthGridMin || 0;
+        depthGridMax = d.sonar.depthGridMax || 1;
+        render3D();
+      } catch(e) { console.error('3d:', e); }
+    }
+  }
+
+  // Nav
+  if (d.sub) {
+    $('heading').textContent = d.sub.heading.toFixed(0) + '°';
+    $('speed').textContent = d.sub.speed.toFixed(1) + ' m/s';
+    $('position').textContent = d.sub.x.toFixed(0) + ', ' + d.sub.z.toFixed(0);
+    $('rudder').textContent = d.sub.rudder < -0.1 ? '◄ PORT' : d.sub.rudder > 0.1 ? 'STBD ►' : 'CENTER';
+    $('depth').textContent = d.sub.depth.toFixed(1) + 'm';
+    $('vspeed').textContent = d.sub.verticalVelocity.toFixed(2) + ' m/s';
+    var depthPct = Math.min(100, (d.sub.depth / d.sub.crushDepth) * 100);
+    var depthBar = $('depth-bar');
+    depthBar.style.width = depthPct + '%';
+    depthBar.style.background = d.sub.belowCrush ? '#ff4444' : depthPct > 80 ? '#ffa500' : '#4ec9b0';
+    $('needle').style.transform = 'rotate(' + d.sub.heading + 'deg) translateY(-100%)';
+    // Update depth slider max
+    $('sl-depth').max = d.sub.crushDepth;
+  }
+
+  // Nav state → control badges
+  if (d.nav) {
+    apState = d.nav.autopilot;
+    dhState = d.nav.depthHold;
+    setBadge($('btn-ap'), apState, 'AP');
+    setBadge($('btn-dh'), dhState, 'DH');
+    $('depth-target').textContent = d.nav.desiredDepth.toFixed(0) + 'm';
+    desiredHeading = d.nav.desiredHeading;
+    desiredSpeed = d.nav.desiredSpeed;
+    $('hdg-val').textContent = desiredHeading.toFixed(0) + '°';
+    $('spd-set-val').textContent = desiredSpeed.toFixed(0) + ' m/s';
+    // Sync sliders if not being touched
+    if (!sliderTouching['sl-depth']) { $('sl-depth').value = d.nav.desiredDepth; $('sl-depth-val').textContent = d.nav.desiredDepth.toFixed(0) + 'm'; }
+  }
+  if (d.engine && !sliderTouching['sl-throttle']) {
+    $('sl-throttle').value = Math.round(d.engine.throttle * 100);
+    $('sl-throttle-val').textContent = Math.round(d.engine.throttle * 100) + '%';
+  }
+
+  // Reactors
+  if (d.power && d.power.reactors) renderReactors(d.power.reactors);
+
+  // Power grid
+  if (d.power) {
+    $('power-summary').textContent = d.power.production.toFixed(0) + 'W / ' + d.power.consumption.toFixed(0) + 'W';
+    var pRatio = d.power.consumption > 0 ? Math.min(1, d.power.production / d.power.consumption) : 1;
+    var pBar = $('power-bar');
+    pBar.style.width = (pRatio * 100) + '%';
+    pBar.style.background = pRatio >= 1 ? '#4ec9b0' : pRatio > 0.7 ? '#ffa500' : '#ff4444';
+
+    var bHtml = '';
+    d.power.batteries.forEach(function(b, i) {
+      var bColor = b.fraction > 0.3 ? '#4ec9b0' : b.fraction > 0.1 ? '#ffa500' : '#ff4444';
+      bHtml += '<div class="row"><span class="label">Battery ' + i + '</span><span class="val" style="color:' + bColor + '">' + (b.fraction * 100).toFixed(0) + '%</span></div>';
+    });
+    $('batteries').innerHTML = bHtml;
+
+    var jHtml = '';
+    d.power.junctions.forEach(function(j, i) {
+      var jColor = j.overloaded ? '#ff4444' : j.shorted ? '#ffa500' : '#4ec9b0';
+      jHtml += '<div class="row"><span class="label">Junction ' + i + '</span><span class="val" style="color:' + jColor + '">' + j.load.toFixed(0) + '/' + j.maxLoad.toFixed(0) + 'W ' + j.condition.toFixed(0) + '%</span></div>';
+    });
+    $('junctions').innerHTML = jHtml;
+  }
+
+  // Deck view
+  if (d.compartments) renderDeckView(d.compartments);
+
+  // Mission
+  var mc = $('mission-card');
+  if (d.mission && d.mission.available && d.mission.label) {
+    var html = '<div class="mission-label">' + d.mission.label + '</div>';
+    html += '<div class="mission-dist">' + d.mission.distance.toFixed(0) + 'm @ ' + d.mission.bearing.toFixed(0) + '°</div>';
+    html += '<div class="row"><span class="label">Round</span><span class="val">' + d.mission.round + ' (' + d.mission.phase + ')</span></div>';
+    html += '<div class="row"><span class="label">Progress</span><span class="val">' + d.mission.completed + '/' + d.mission.total + '</span></div>';
+    if (d.mission.holdSeconds > 0) {
+      var hPct = (d.mission.holdProgress / d.mission.holdSeconds * 100).toFixed(0);
+      html += '<div class="row"><span class="label">Hold</span><span class="val">' + hPct + '%</span></div>';
+    }
+    mc.innerHTML = html;
+  } else {
+    mc.innerHTML = '<div style="text-align:center;color:#666">STANDING BY</div>';
+  }
+
+  $('update-time').textContent = new Date().toLocaleTimeString();
+}
+
+function refresh() {
+  if (document.hidden) return;
+  fetch('/api/status').then(function(r){return r.json();}).then(update).catch(function(){
+    staleCount++;
+    if (staleCount > 3) $('stale').style.display = 'block';
+  });
+}
+setInterval(refresh, 1000);
+refresh();
+</script>
+</body>
+</html>

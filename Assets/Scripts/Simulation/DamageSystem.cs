@@ -603,11 +603,6 @@ namespace SFP.Simulation
                 _ceilingContact = false;
             }
 
-            if (Terrain.Map != null)
-            {
-                _sub.PositionX = Math.Clamp(_sub.PositionX, 10f, Terrain.Map.WorldSizeX - 10f);
-                _sub.PositionZ = Math.Clamp(_sub.PositionZ, 10f, Terrain.Map.WorldSizeZ - 10f);
-            }
         }
 
         void ApplyImpactDamage(float impactSpeed, HullFace face)

@@ -22,12 +22,13 @@ namespace SFP.Simulation
 
     public sealed class CreatureSystem
     {
-        const float SpawnMinDistFromMapSpawn = 500f;
-        const float SpawnBorderMargin = 150f;
+        const float SpawnRadiusMin = 400f;
+        const float SpawnRadiusMax = 700f;
+        const float DespawnRadius = 1200f;
+        const float SpawnCooldown = 5f;
         const float SpawnMinWaterColumn = 100f;
         const float SpawnBandEdgeMargin = 10f;
 
-        const float MoveBorderMargin = 100f;
         const float DepthBandMargin = 20f;
 
         const float PatrolSpeed = 3f;
@@ -53,75 +54,87 @@ namespace SFP.Simulation
 
         readonly List<CreatureState> _creatures = new();
         readonly int _seed;
-        readonly MapData _map;
+        readonly ProceduralMapData _map;
         int _tickCounter;
 
-        public int CreatureCount = 6;
+        public int MaxActiveCreatures = 6;
+        float _spawnTimer;
+        int _spawnCounter;
+        int _nextId;
 
         public IReadOnlyList<CreatureState> Creatures => _creatures;
 
-        public CreatureSystem(int seed, MapData map)
+        public CreatureSystem(int seed, ProceduralMapData map)
         {
             _seed = seed;
             _map = map;
-            Spawn();
-        }
-
-        void Spawn()
-        {
-            _creatures.Clear();
-            if (_map == null) return;
-
-            float usableX = Math.Max(0f, _map.WorldSizeX - 2f * SpawnBorderMargin);
-            float usableZ = Math.Max(0f, _map.WorldSizeZ - 2f * SpawnBorderMargin);
-
-            int attempt = 0;
-            int id = 0;
-            while (_creatures.Count < CreatureCount && attempt < 8000)
-            {
-                float hx = HashToFloat(attempt, 501, _seed + 71011);
-                float hz = HashToFloat(attempt, 502, _seed + 71011);
-                float cx = SpawnBorderMargin + hx * usableX;
-                float cz = SpawnBorderMargin + hz * usableZ;
-                attempt++;
-
-                float dxSpawn = cx - _map.SpawnX;
-                float dzSpawn = cz - _map.SpawnZ;
-                if (dxSpawn * dxSpawn + dzSpawn * dzSpawn < SpawnMinDistFromMapSpawn * SpawnMinDistFromMapSpawn)
-                    continue;
-
-                float floor = _map.GetFloorDepthAt(cx, cz);
-                float ceiling = _map.GetCeilingDepthAt(cx, cz);
-                float bandTop = ceiling > 0f ? ceiling : 0f;
-                if (floor - bandTop < SpawnMinWaterColumn) continue;
-
-                float lo = bandTop + SpawnBandEdgeMargin;
-                float hi = floor - SpawnBandEdgeMargin;
-                if (hi <= lo) continue;
-
-                float mid = (lo + hi) * 0.5f;
-                float dh = HashToFloat(attempt, 503, _seed + 71011);
-                float depth = mid + (dh - 0.5f) * (hi - lo) * 0.3f;
-                depth = Math.Clamp(depth, lo, hi);
-
-                float dw = HashToFloat(id, 504, _seed + 71011);
-
-                _creatures.Add(new CreatureState
-                {
-                    Id = id++,
-                    X = cx,
-                    Z = cz,
-                    Depth = depth,
-                    Health = 100f,
-                    Behavior = CreatureBehavior.Patrol,
-                    WanderHeading = dw * 360f,
-                });
-            }
         }
 
         public void Tick(float dt, SubmarineState sub, DamageSystem damage, TerrainModel terrain, bool activeSonarPinging, OceanCurrentField currents = null)
         {
             _tickCounter++;
+
+            // Despawn pass: remove creatures too far from the sub
+            for (int i = _creatures.Count - 1; i >= 0; i--)
+            {
+                var c = _creatures[i];
+                float dx = sub.PositionX - c.X;
+                float dz = sub.PositionZ - c.Z;
+                float dist2D = (float)Math.Sqrt(dx * dx + dz * dz);
+                if (dist2D > DespawnRadius)
+                {
+                    _creatures.RemoveAt(i);
+                }
+            }
+
+            // Spawn pass: try to spawn new creatures near the sub
+            _spawnTimer += dt;
+            if (_spawnTimer >= SpawnCooldown && _creatures.Count < MaxActiveCreatures && _map != null)
+            {
+                _spawnTimer = 0f;
+
+                for (int attempt = 0; attempt < 8; attempt++)
+                {
+                    float hAngle = HashToFloat(_spawnCounter, 601, _seed + 71011);
+                    _spawnCounter++;
+                    float hRadius = HashToFloat(_spawnCounter, 602, _seed + 71011);
+                    _spawnCounter++;
+
+                    float angle = hAngle * 2f * (float)Math.PI;
+                    float r = SpawnRadiusMin + hRadius * (SpawnRadiusMax - SpawnRadiusMin);
+                    float cx = sub.PositionX + (float)Math.Cos(angle) * r;
+                    float cz = sub.PositionZ + (float)Math.Sin(angle) * r;
+
+                    float floor = _map.GetFloorDepthAt(cx, cz);
+                    float ceiling = _map.GetCeilingDepthAt(cx, cz);
+                    float bandTop = ceiling > 0f ? ceiling : 0f;
+                    if (floor - bandTop < SpawnMinWaterColumn) continue;
+
+                    float lo = bandTop + SpawnBandEdgeMargin;
+                    float hi = floor - SpawnBandEdgeMargin;
+                    if (hi <= lo) continue;
+
+                    float mid = (lo + hi) * 0.5f;
+                    float dh = HashToFloat(_spawnCounter, 603, _seed + 71011);
+                    _spawnCounter++;
+                    float depth = mid + (dh - 0.5f) * (hi - lo) * 0.3f;
+                    depth = Math.Clamp(depth, lo, hi);
+
+                    float dw = HashToFloat(_nextId, 504, _seed + 71011);
+
+                    _creatures.Add(new CreatureState
+                    {
+                        Id = _nextId++,
+                        X = cx,
+                        Z = cz,
+                        Depth = depth,
+                        Health = 100f,
+                        Behavior = CreatureBehavior.Patrol,
+                        WanderHeading = dw * 360f,
+                    });
+                    break;
+                }
+            }
 
             for (int i = 0; i < _creatures.Count; i++)
             {
@@ -183,7 +196,7 @@ namespace SFP.Simulation
                     c.Z += curZ * dt;
                 }
 
-                ClampToWorldAndBand(c, terrain);
+                ClampToDepthBand(c, terrain);
             }
         }
 
@@ -269,14 +282,8 @@ namespace SFP.Simulation
             c.VelDepth = vd;
         }
 
-        void ClampToWorldAndBand(CreatureState c, TerrainModel terrain)
+        void ClampToDepthBand(CreatureState c, TerrainModel terrain)
         {
-            if (_map != null)
-            {
-                c.X = Math.Clamp(c.X, MoveBorderMargin, Math.Max(MoveBorderMargin, _map.WorldSizeX - MoveBorderMargin));
-                c.Z = Math.Clamp(c.Z, MoveBorderMargin, Math.Max(MoveBorderMargin, _map.WorldSizeZ - MoveBorderMargin));
-            }
-
             if (terrain == null) return;
             float floor = terrain.GetFloorDepthAt(c.X, c.Z);
             float ceiling = terrain.GetCeilingDepthAt(c.X, c.Z);

@@ -7,13 +7,11 @@ namespace SFP.Tests
     [TestFixture]
     public class OceanCurrentTests
     {
-        const float WorldSize = 2000f;
-
         [Test]
-        public void Sample_IsDeterministic_ForSameSeedAndWorldSize()
+        public void Sample_IsDeterministic_ForSameSeed()
         {
-            var a = new OceanCurrentField(42, WorldSize);
-            var b = new OceanCurrentField(42, WorldSize);
+            var a = new OceanCurrentField(42);
+            var b = new OceanCurrentField(42);
 
             for (int i = 0; i < 20; i++)
             {
@@ -32,16 +30,15 @@ namespace SFP.Tests
         [Test]
         public void Sample_MagnitudeNeverExceedsMax_AndAverageIsMeaningful()
         {
-            var field = new OceanCurrentField(7, WorldSize);
+            var field = new OceanCurrentField(7);
             var rng = new Random(1234);
 
             double total = 0.0;
             const int Count = 1000;
             for (int i = 0; i < Count; i++)
             {
-                // Stay well inside the map so border damping doesn't dominate the average.
-                float x = 300f + (float)rng.NextDouble() * (WorldSize - 600f);
-                float z = 300f + (float)rng.NextDouble() * (WorldSize - 600f);
+                float x = (float)rng.NextDouble() * 4000f;
+                float z = (float)rng.NextDouble() * 4000f;
                 float depth = (float)rng.NextDouble() * 100f;
 
                 field.Sample(x, z, depth, out float vx, out float vz);
@@ -58,7 +55,7 @@ namespace SFP.Tests
         [Test]
         public void DepthAttenuation_WeakensCurrentBelowFortyPercent()
         {
-            var field = new OceanCurrentField(7, WorldSize);
+            var field = new OceanCurrentField(7);
 
             field.Sample(500f, 500f, 0f, out float shallowX, out float shallowZ);
             field.Sample(500f, 500f, 600f, out float deepX, out float deepZ);
@@ -75,48 +72,19 @@ namespace SFP.Tests
         {
             Assert.AreEqual(1f, OceanCurrentField.ComputeDepthFactor(0f), 1e-5f);
             Assert.AreEqual(0.25f, OceanCurrentField.ComputeDepthFactor(600f), 1e-5f);
-            Assert.AreEqual(0.1f, OceanCurrentField.ComputeDepthFactor(2000f), 1e-5f); // floor
+            Assert.AreEqual(0.1f, OceanCurrentField.ComputeDepthFactor(2000f), 1e-5f);
         }
 
         [Test]
-        public void ComputeBorderFactor_TapersNearEdges()
+        public void Sample_DepthOnly_ReducesRawCurrentByExpectedFactor()
         {
-            float nearEdge = OceanCurrentField.ComputeBorderFactor(50f, 1000f, WorldSize);
-            float interior = OceanCurrentField.ComputeBorderFactor(500f, 1000f, WorldSize);
-            float onEdge = OceanCurrentField.ComputeBorderFactor(0f, 1000f, WorldSize);
+            var field = new OceanCurrentField(7);
 
-            Assert.AreEqual(0.5f, nearEdge, 1e-5f);
-            Assert.AreEqual(1f, interior, 1e-5f);
-            Assert.AreEqual(0f, onEdge, 1e-5f);
-        }
-
-        [Test]
-        public void Sample_NearEdge_IsBoundedByBorderDamping()
-        {
-            var field = new OceanCurrentField(7, WorldSize);
-
-            // Within 100m of the x=0 edge: border factor is exactly 0.5 by formula.
-            field.Sample(50f, 1000f, 200f, out float vx, out float vz);
-            float mag = (float)Math.Sqrt(vx * vx + vz * vz);
-
-            float borderFactor = OceanCurrentField.ComputeBorderFactor(50f, 1000f, WorldSize);
-            float depthFactor = OceanCurrentField.ComputeDepthFactor(200f);
-            float maxAllowed = field.MaxCurrentSpeed * borderFactor * depthFactor;
-
-            Assert.LessOrEqual(mag, maxAllowed + 1e-4f);
-        }
-
-        [Test]
-        public void Sample_BorderDamping_ReducesRawCurrentByExpectedFactor()
-        {
-            var field = new OceanCurrentField(7, WorldSize);
-
-            float x = 50f, z = 1000f, depth = 200f;
+            float x = 500f, z = 500f, depth = 200f;
             field.SampleRaw(x, z, out float rawX, out float rawZ);
             field.Sample(x, z, depth, out float dampedX, out float dampedZ);
 
-            float expectedFactor = OceanCurrentField.ComputeBorderFactor(x, z, WorldSize)
-                * OceanCurrentField.ComputeDepthFactor(depth);
+            float expectedFactor = OceanCurrentField.ComputeDepthFactor(depth);
 
             Assert.AreEqual(rawX * expectedFactor, dampedX, 1e-5f);
             Assert.AreEqual(rawZ * expectedFactor, dampedZ, 1e-5f);

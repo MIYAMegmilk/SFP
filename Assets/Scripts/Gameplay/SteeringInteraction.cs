@@ -12,6 +12,8 @@ namespace SFP.Gameplay
 
         bool _isSteering;
         int _targetWaypointIndex = 1;
+        readonly System.Collections.Generic.List<(float X, float Z)> _nearbyNodes = new();
+        float _nodeRefreshTimer;
 
         public bool IsSteering => _isSteering;
 
@@ -100,20 +102,26 @@ namespace SFP.Gameplay
                 }
             }
 
-            var waypoints = bridge.Map?.ChannelWaypoints;
-            if (waypoints != null && waypoints.Count > 0)
+            _nodeRefreshTimer -= Time.deltaTime;
+            if (_nodeRefreshTimer <= 0f)
             {
-                if (_targetWaypointIndex >= waypoints.Count) _targetWaypointIndex = 0;
+                _nodeRefreshTimer = 2f;
+                bridge.Map?.GetNearbyChannelNodes(sub.PositionX, sub.PositionZ, _nearbyNodes);
+                if (_targetWaypointIndex >= _nearbyNodes.Count)
+                    _targetWaypointIndex = 0;
+            }
 
+            if (_nearbyNodes.Count > 0)
+            {
                 if (kb.nKey.wasPressedThisFrame)
-                    _targetWaypointIndex = (_targetWaypointIndex + 1) % waypoints.Count;
+                    _targetWaypointIndex = (_targetWaypointIndex + 1) % _nearbyNodes.Count;
 
-                var wp = waypoints[_targetWaypointIndex];
+                var wp = _nearbyNodes[_targetWaypointIndex];
                 float wdx = wp.X - sub.PositionX;
                 float wdz = wp.Z - sub.PositionZ;
                 float wdist = Mathf.Sqrt(wdx * wdx + wdz * wdz);
                 if (wdist < WaypointArrivalDistance)
-                    _targetWaypointIndex = (_targetWaypointIndex + 1) % waypoints.Count;
+                    _targetWaypointIndex = (_targetWaypointIndex + 1) % _nearbyNodes.Count;
             }
         }
 
@@ -127,8 +135,7 @@ namespace SFP.Gameplay
             var sub = bridge.SubState;
             var engine = bridge.Engine;
             var nav = bridge.Navigation;
-            var waypoints = bridge.Map?.ChannelWaypoints;
-            bool showWaypoint = waypoints != null && waypoints.Count > 0;
+            bool showWaypoint = _nearbyNodes.Count > 0;
 
             float cx = Screen.width * 0.5f;
             float top = Screen.height * 0.25f;
@@ -201,8 +208,8 @@ namespace SFP.Gameplay
 
             if (showWaypoint)
             {
-                int idx = _targetWaypointIndex >= waypoints.Count ? 0 : _targetWaypointIndex;
-                var wp = waypoints[idx];
+                int idx = _targetWaypointIndex >= _nearbyNodes.Count ? 0 : _targetWaypointIndex;
+                var wp = _nearbyNodes[idx];
                 float wdx = wp.X - sub.PositionX;
                 float wdz = wp.Z - sub.PositionZ;
                 float wdist = Mathf.Sqrt(wdx * wdx + wdz * wdz);
@@ -216,7 +223,7 @@ namespace SFP.Gameplay
                 var wpStyle = new GUIStyle(style) { normal = { textColor = wpColor } };
 
                 GUI.Label(new Rect(lx, y, panelW, 20),
-                    $"WP {idx}/{waypoints.Count}: {wdist:F0}m brg {bearing:F0}°  {turnHint}", wpStyle);
+                    $"WP {idx}/{_nearbyNodes.Count}: {wdist:F0}m brg {bearing:F0}°  {turnHint}", wpStyle);
                 y += 20f;
                 GUI.Label(new Rect(lx, y, panelW, 20), "(N: next  M: autopilot to mission)", style);
                 y += 22f;
