@@ -58,6 +58,8 @@ namespace SFP.Gameplay
             if (col.GetComponentInParent<TurretDefinition>() != null) return "Turret [E]";
             if (col.GetComponentInParent<SuppressionSystemDefinition>() != null) return "Fire Suppression [E]";
             if (col.GetComponentInParent<OxygenGeneratorDefinition>() != null) return "Oxygen Generator [E]";
+            if (col.GetComponentInParent<CO2ScrubberDefinition>() != null) return "CO2 Scrubber [E]";
+            if (col.GetComponentInParent<VentDefinition>() != null) return "HVAC Vent [E]";
             if (col.GetComponentInParent<JunctionBoxDefinition>() != null) return "Junction Box";
             if (col.GetComponentInParent<BatteryDefinition>() != null) return "Battery";
             if (col.GetComponentInParent<EngineDefinition>() != null) return "Engine";
@@ -176,6 +178,15 @@ namespace SFP.Gameplay
                 }
             }
 
+            // Room environment panel (right side)
+            DrawEnvironmentPanel(bridge, style);
+
+            // Navigation bar (bottom center, above oxygen)
+            DrawNavigationBar(bridge, style);
+
+            // CO2 / temperature warnings (top center, stacked below pressure)
+            DrawAtmosphereWarnings(bridge);
+
             // Crosshair
             float size = 2f;
             float cx = sw * 0.5f, cy = sh * 0.5f;
@@ -246,6 +257,166 @@ namespace SFP.Gameplay
                 GUI.color = Color.Lerp(Color.yellow, Color.red, ds.HullStress);
                 GUI.DrawTexture(new Rect(12, y + 2, 150 * ds.HullStress, 8), Texture2D.whiteTexture);
                 GUI.color = Color.white;
+            }
+        }
+
+        void DrawEnvironmentPanel(SimulationBridge bridge, GUIStyle baseStyle)
+        {
+            if (bridge == null) return;
+            int id = _player.CurrentCompartmentId;
+            if (id < 0) return;
+
+            var comp = bridge.Graph.GetCompartment(id);
+            if (comp == null) return;
+
+            float sw = Screen.width;
+            float panelW = 180f;
+            float panelX = sw - panelW - 10f;
+            float y = 34f;
+
+            var headerStyle = new GUIStyle(baseStyle)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = new Color(0.7f, 0.9f, 1f) }
+            };
+            var lineStyle = new GUIStyle(baseStyle) { fontSize = 11 };
+
+            // Room name
+            var def = bridge.GetCompartmentDef(id);
+            string roomName = def != null ? def.gameObject.name : $"Comp {id}";
+            GUI.Label(new Rect(panelX, y, panelW, 16), roomName, headerStyle);
+            y += 18f;
+
+            // O2 bar
+            float o2 = bridge.Atmosphere != null ? bridge.Atmosphere.GetOxygenLevel(id) : 1f;
+            Color o2Color = o2 > 0.5f ? Color.green : o2 > 0.2f ? Color.yellow : Color.red;
+            DrawMiniBar(panelX, y, panelW, 10f, o2, o2Color, $"O2 {o2 * 100f:F0}%", lineStyle);
+            y += 16f;
+
+            // CO2 bar
+            float co2 = bridge.Atmosphere != null ? bridge.Atmosphere.GetCo2Level(id) : 0f;
+            Color co2Color = co2 < 0.03f ? Color.green : co2 < 0.05f ? Color.yellow : Color.red;
+            DrawMiniBar(panelX, y, panelW, 10f, Mathf.Clamp01(co2 / 0.15f), co2Color,
+                $"CO2 {co2 * 100f:F1}%", lineStyle);
+            y += 16f;
+
+            // Temperature
+            float tempK = bridge.Temperature != null ? bridge.Temperature.GetTemperatureK(id) : 293.15f;
+            float tempC = tempK - 273.15f;
+            Color tempColor = tempC < 35f ? Color.green : tempC < 45f ? Color.yellow : Color.red;
+            lineStyle.normal.textColor = tempColor;
+            GUI.Label(new Rect(panelX, y, panelW, 16), $"Temp {tempC:F0}°C", lineStyle);
+            y += 16f;
+
+            // Pressure
+            float press = comp.AirPressureAtm;
+            Color pressColor = press < 1.5f ? Color.green : press < 3f ? Color.yellow : Color.red;
+            lineStyle.normal.textColor = pressColor;
+            GUI.Label(new Rect(panelX, y, panelW, 16), $"Pressure {press:F2} atm", lineStyle);
+            y += 16f;
+
+            // Water level
+            float water = comp.WaterFraction;
+            if (water > 0.01f)
+            {
+                Color waterColor = water < 0.3f ? Color.cyan : water < 0.7f ? Color.yellow : Color.red;
+                DrawMiniBar(panelX, y, panelW, 10f, water, waterColor,
+                    $"Water {water * 100f:F0}%", lineStyle);
+                y += 16f;
+            }
+
+            // Fire
+            float fire = bridge.FireSystem != null ? bridge.FireSystem.GetFireIntensity(id) : 0f;
+            if (fire > 0.01f)
+            {
+                bool flash = Mathf.Repeat(Time.time, 0.4f) < 0.2f;
+                Color fireColor = flash ? Color.red : new Color(1f, 0.5f, 0f);
+                lineStyle.normal.textColor = fireColor;
+                GUI.Label(new Rect(panelX, y, panelW, 16), $"FIRE {fire * 100f:F0}%", lineStyle);
+            }
+        }
+
+        void DrawMiniBar(float x, float y, float w, float h, float frac, Color color, string label, GUIStyle style)
+        {
+            float barW = w * 0.55f;
+            float labelW = w - barW - 4f;
+
+            GUI.Box(new Rect(x, y, barW + 2, h + 2), "");
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(x + 1, y + 1, barW * Mathf.Clamp01(frac), h), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            style.normal.textColor = color;
+            GUI.Label(new Rect(x + barW + 4, y - 2, labelW, h + 4), label, style);
+        }
+
+        void DrawNavigationBar(SimulationBridge bridge, GUIStyle baseStyle)
+        {
+            if (bridge?.Submarine == null) return;
+
+            float sw = Screen.width;
+            float sh = Screen.height;
+            var sub = bridge.Submarine;
+
+            float navY = sh - 30f;
+            if (_player.IsSubmerged) navY = sh - 82f;
+
+            var navStyle = new GUIStyle(baseStyle)
+            {
+                fontSize = 12,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.6f, 0.85f, 1f) }
+            };
+
+            string depth = $"Depth {sub.Depth:F0}m";
+            string speed = $"Speed {sub.HorizontalSpeedMagnitude:F1}m/s";
+            string heading = $"HDG {sub.Heading:F0}°";
+
+            string navText = $"{depth}  |  {speed}  |  {heading}";
+            GUI.Label(new Rect(0, navY, sw, 20), navText, navStyle);
+        }
+
+        void DrawAtmosphereWarnings(SimulationBridge bridge)
+        {
+            if (bridge == null) return;
+            int id = _player.CurrentCompartmentId;
+            if (id < 0) return;
+
+            float sw = Screen.width;
+            float warningY = 30f;
+            if (_player.RoomPressureAtm > 1.2f) warningY += 25f;
+
+            var warnStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.UpperCenter
+            };
+
+            // CO2 warning
+            float co2 = bridge.Atmosphere != null ? bridge.Atmosphere.GetCo2Level(id) : 0f;
+            if (co2 > 0.05f)
+            {
+                bool flash = co2 > 0.10f && Mathf.Repeat(Time.time, 0.5f) < 0.25f;
+                Color co2WarnColor = co2 > 0.10f ? Color.red : Color.yellow;
+                if (flash) co2WarnColor = Color.white;
+                warnStyle.normal.textColor = co2WarnColor;
+                string severity = co2 > 0.15f ? "LETHAL" : co2 > 0.10f ? "DANGER" : "WARNING";
+                GUI.Label(new Rect(0, warningY, sw, 25), $"CO2 {severity}: {co2 * 100f:F1}%", warnStyle);
+                warningY += 25f;
+            }
+
+            // Temperature warning
+            float tempK = bridge.Temperature != null ? bridge.Temperature.GetTemperatureK(id) : 293.15f;
+            float tempC = tempK - 273.15f;
+            if (tempC > 45f)
+            {
+                bool flash = tempC > 70f && Mathf.Repeat(Time.time, 0.5f) < 0.25f;
+                Color tempWarnColor = tempC > 70f ? Color.red : Color.yellow;
+                if (flash) tempWarnColor = Color.white;
+                warnStyle.normal.textColor = tempWarnColor;
+                GUI.Label(new Rect(0, warningY, sw, 25), $"HEAT: {tempC:F0}°C", warnStyle);
             }
         }
 

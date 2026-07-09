@@ -49,6 +49,7 @@ namespace SFP.Gameplay
         public bool IsSubmerged => _isSubmerged;
         public float EffectiveMaxOxygen => HasDivingSuit ? DivingSuitOxygen : MaxOxygen;
         public float RoomPressureAtm { get; private set; } = 1f;
+        public int CurrentCompartmentId => _currentCompartmentId;
 
         public float SuitCrushDepth = 300f;
         public bool IsEVA { get; private set; }
