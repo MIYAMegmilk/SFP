@@ -29,8 +29,6 @@ Thumbs.db
 # Crashlytics
 crashlytics-build.properties
 
-# MCP
-.mcp.json
 
 # Tools
 cloudflared.exe
