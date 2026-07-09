@@ -15,6 +15,8 @@ namespace SFP.Simulation
         public float FlowQ;
         public float FlowVelocity;
         public float FlowScale = 1f;
+        // Outward normal for blowout impulse (ship-local). Zero = no impulse contribution.
+        public float NormalX, NormalY, NormalZ;
         public float EffectiveArea => Area * FlowScale;
 
         public const int Sea = -1;

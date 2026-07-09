@@ -43,6 +43,10 @@ namespace SFP.Presentation
         readonly System.Collections.Generic.List<SonarState> _sonars = new();
         readonly System.Collections.Generic.List<FabricatorState> _fabricators = new();
         FireSystem _fireSystem;
+        GasFlowSystem _gasFlow;
+        TemperatureSystem _temperature;
+        readonly System.Collections.Generic.List<CO2ScrubberState> _scrubbers = new();
+        readonly System.Collections.Generic.List<VentState> _vents = new();
         readonly System.Collections.Generic.List<TurretState> _turrets = new();
         readonly System.Collections.Generic.List<SuppressionSystemState> _suppressions = new();
         float _tickAccumulator;
@@ -65,6 +69,8 @@ namespace SFP.Presentation
         public CreatureSystem Creatures { get; private set; }
         public OceanCurrentField OceanCurrents { get; private set; }
         public FireSystem FireSystem => _fireSystem;
+        public GasFlowSystem GasFlow => _gasFlow;
+        public TemperatureSystem Temperature => _temperature;
         public EngineState Engine => _engine;
         public NavigationState Navigation => _navigation;
         public BallastTankState[] Ballasts => _ballasts;
@@ -165,6 +171,8 @@ namespace SFP.Presentation
             }
 
             _atmosphere = new AtmosphereSystem(_graph);
+            _gasFlow = new GasFlowSystem(_graph, _atmosphere) { Submarine = _subState };
+            _temperature = new TemperatureSystem(_graph);
 
             var oxygenDefs = FindObjectsByType<OxygenGeneratorDefinition>(FindObjectsSortMode.None);
             for (int i = 0; i < oxygenDefs.Length; i++)
@@ -180,6 +188,41 @@ namespace SFP.Presentation
                 };
                 _oxygenGenerators.Add(gen);
                 od.GeneratorIndex = i;
+            }
+
+            var scrubberDefs = FindObjectsByType<CO2ScrubberDefinition>(FindObjectsSortMode.None);
+            for (int i = 0; i < scrubberDefs.Length; i++)
+            {
+                var sd = scrubberDefs[i];
+                var node = _powerGrid.AddNode(0f, sd.PowerConsumption);
+                var scrubber = new CO2ScrubberState
+                {
+                    PowerNodeId = node.Id,
+                    ProcessRate = sd.ProcessRate,
+                    Efficiency = sd.Efficiency,
+                    TargetCompartmentId = sd.TargetCompartment != null
+                        ? GetCompartmentId(sd.TargetCompartment) : -1,
+                };
+                _scrubbers.Add(scrubber);
+                sd.ScrubberIndex = i;
+            }
+
+            var ventDefs = FindObjectsByType<VentDefinition>(FindObjectsSortMode.None);
+            for (int i = 0; i < ventDefs.Length; i++)
+            {
+                var vd = ventDefs[i];
+                var node = _powerGrid.AddNode(0f, vd.PowerConsumption);
+                var vent = new VentState
+                {
+                    PowerNodeId = node.Id,
+                    CompartmentA = vd.CompartmentA != null ? GetCompartmentId(vd.CompartmentA) : -1,
+                    CompartmentB = vd.CompartmentB != null ? GetCompartmentId(vd.CompartmentB) : -1,
+                    DuctArea = vd.DuctArea,
+                    FanFlowRate = vd.FanFlowRate,
+                    DuctY = vd.transform.position.y,
+                };
+                _vents.Add(vent);
+                vd.VentIndex = i;
             }
 
             var engineDefs = FindObjectsByType<EngineDefinition>(FindObjectsSortMode.None);
@@ -305,6 +348,25 @@ namespace SFP.Presentation
                 _damageSystem.RegisterHullSection(cid, HullFace.Ceiling, Mathf.Abs(ceil - maxCeilY) < 0.1f);
             }
 
+            // Compute exterior hull area per compartment for temperature system
+            foreach (var def in compartmentDefs)
+            {
+                int cid = _defToId[def];
+                float cx = def.transform.position.x;
+                float cz = def.transform.position.z;
+                float hx = def.LengthX * 0.5f;
+                float hz = def.WidthZ * 0.5f;
+                float ceil = def.FloorY + def.Height;
+                float extArea = 0f;
+                if (Mathf.Abs(cx + hx - maxX) < 0.1f) extArea += def.WidthZ * def.Height;
+                if (Mathf.Abs(cx - hx - minX) < 0.1f) extArea += def.WidthZ * def.Height;
+                if (Mathf.Abs(cz + hz - maxZ) < 0.1f) extArea += def.LengthX * def.Height;
+                if (Mathf.Abs(cz - hz - minZ) < 0.1f) extArea += def.LengthX * def.Height;
+                if (Mathf.Abs(def.FloorY - minFloorY) < 0.1f) extArea += def.FloorArea;
+                if (Mathf.Abs(ceil - maxCeilY) < 0.1f) extArea += def.FloorArea;
+                _temperature.SetExteriorArea(cid, extArea);
+            }
+
             _fireSystem = new FireSystem(_graph);
             _damageSystem.Fire = _fireSystem;
 
@@ -378,10 +440,16 @@ namespace SFP.Presentation
                 float curX = 0f, curZ = 0f;
                 OceanCurrents?.Sample(_subState.PositionX, _subState.PositionZ, _subState.Depth,
                     out curX, out curZ);
+                _gasFlow.Tick(_dt);
                 _subState.Tick(_dt, _graph, thrust, curX, curZ);
                 _atmosphere.Tick(_dt);
+                _temperature.Tick(_dt, _fireSystem);
                 for (int i = 0; i < _oxygenGenerators.Count; i++)
                     _oxygenGenerators[i].Tick(_dt, _atmosphere, _powerGrid);
+                for (int i = 0; i < _scrubbers.Count; i++)
+                    _scrubbers[i].Tick(_dt, _graph, _atmosphere, _powerGrid);
+                for (int i = 0; i < _vents.Count; i++)
+                    _vents[i].Tick(_dt, _graph, _atmosphere, _powerGrid);
                 for (int i = 0; i < _sonars.Count; i++)
                     _sonars[i].Tick(_dt, _powerGrid, _subState, Terrain, MineSystem, Creatures);
                 for (int i = 0; i < _fabricators.Count; i++)
@@ -448,6 +516,16 @@ namespace SFP.Presentation
         public SuppressionSystemState GetSuppression(int index)
         {
             return index >= 0 && index < _suppressions.Count ? _suppressions[index] : null;
+        }
+
+        public CO2ScrubberState GetScrubber(int index)
+        {
+            return index >= 0 && index < _scrubbers.Count ? _scrubbers[index] : null;
+        }
+
+        public VentState GetVent(int index)
+        {
+            return index >= 0 && index < _vents.Count ? _vents[index] : null;
         }
 
         public Opening AddBreachAtRuntime(CompartmentDefinition target, float area,

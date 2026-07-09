@@ -107,6 +107,14 @@ namespace SFP.Simulation
                     continue;
                 }
 
+                float co2 = atmosphere?.GetCo2Level(id) ?? 0f;
+                if (co2 > 0.15f)
+                {
+                    _fireIntensity[id] = intensity * (1f - 2f * dt);
+                    if (_fireIntensity[id] < 0.01f) _fireIntensity[id] = 0f;
+                    continue;
+                }
+
                 if (comp.WaterFraction > 0.5f)
                 {
                     _fireIntensity[id] = intensity * (1f - comp.WaterFraction * 3f * dt);
@@ -115,6 +123,7 @@ namespace SFP.Simulation
                 }
 
                 atmosphere?.AddOxygen(id, -intensity * _oxygenConsumptionRate * dt);
+                atmosphere?.AddCo2(id, intensity * 0.005f * dt);
             }
 
             foreach (var o in _graph.Openings)

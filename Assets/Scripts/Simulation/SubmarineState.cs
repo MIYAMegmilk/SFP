@@ -54,6 +54,11 @@ namespace SFP.Simulation
         public float NoiseLevel { get; private set; }
         const float NoiseThrustNormalization = 50000f; // matches EngineState.MaxThrust
 
+        // Accumulated gas forces from blowout events (ship-local, Newtons). Zeroed each tick.
+        public float GasForceLocalX;
+        public float GasForceLocalY;
+        public float GasForceLocalZ;
+
         public void Tick(float dt, CompartmentGraph graph)
         {
             Tick(dt, graph, 0f);
@@ -79,7 +84,7 @@ namespace SFP.Simulation
             float weight = totalMass * Gravity;
             NetForce = weight - buoyancy;
             float vertDrag = -DragCoefficient * Velocity * Math.Abs(Velocity);
-            float vertAccel = (NetForce + vertDrag) / totalMass;
+            float vertAccel = (NetForce + vertDrag + GasForceLocalY) / totalMass;
             Velocity += vertAccel * dt;
             Depth += Velocity * dt;
 
@@ -112,8 +117,11 @@ namespace SFP.Simulation
             float surgeAccel = (engineThrust - HorizontalDragCoefficient * vSurge * Math.Abs(vSurge)) / totalMass;
             float swayAccel = -LateralDragCoefficient * vSway * Math.Abs(vSway) / totalMass;
 
-            VelocityX += (surgeAccel * fwdX + swayAccel * latX) * dt;
-            VelocityZ += (surgeAccel * fwdZ + swayAccel * latZ) * dt;
+            // Rotate ship-local gas force into world frame and apply
+            float gasWorldX = GasForceLocalX * fwdX + GasForceLocalZ * latX;
+            float gasWorldZ = GasForceLocalX * fwdZ + GasForceLocalZ * latZ;
+            VelocityX += (surgeAccel * fwdX + swayAccel * latX + gasWorldX / totalMass) * dt;
+            VelocityZ += (surgeAccel * fwdZ + swayAccel * latZ + gasWorldZ / totalMass) * dt;
             HorizontalSpeed = VelocityX * fwdX + VelocityZ * fwdZ;
 
             PositionX += (VelocityX + oceanCurrentX) * dt;
@@ -122,6 +130,10 @@ namespace SFP.Simulation
             NoiseLevel = Math.Clamp(
                 Math.Abs(engineThrust) / NoiseThrustNormalization * 0.7f
                 + HorizontalSpeedMagnitude / 8f * 0.3f, 0f, 1f);
+
+            GasForceLocalX = 0f;
+            GasForceLocalY = 0f;
+            GasForceLocalZ = 0f;
 
             graph.SeaLevelY = Depth;
         }

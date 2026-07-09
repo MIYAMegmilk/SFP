@@ -400,6 +400,44 @@ public static class FloodTestShipBuilder
             PlaceDeviceConsole(o2Go, new Vector3(-2.4f, -1.9f, -2.3f), new Vector3(0.8f, 1.2f, 0.8f), new Color(0.7f, 0.9f, 1.0f));
         }
 
+        // CO2 scrubbers (same compartments as O2 generators)
+        int[] scrubberComps = { 5, 6 };
+        for (int si = 0; si < scrubberComps.Length; si++)
+        {
+            int ci = scrubberComps[si];
+            var scrubGo = new GameObject($"CO2Scrubber_{si}");
+            scrubGo.transform.SetParent(compDefs[ci].transform);
+            var sd = scrubGo.AddComponent<CO2ScrubberDefinition>();
+            sd.TargetCompartment = compDefs[ci];
+            sd.ProcessRate = 1.0f;
+            sd.Efficiency = 0.95f;
+            sd.PowerConsumption = 60f;
+            scrubGo.AddComponent<CO2ScrubberInteraction>();
+            scrubGo.AddComponent<DeviceDegradation>().Compartment = compDefs[ci];
+            PlaceDeviceConsole(scrubGo, new Vector3(2.4f, -1.9f, -2.3f), new Vector3(0.6f, 1.0f, 0.6f), new Color(0.2f, 0.8f, 0.8f));
+        }
+
+        // HVAC vents (duct connections between adjacent compartments)
+        // Engine(1) <-> Corridor1(4), Living1(5) <-> Living2(7), Corridor2(6) <-> Bridge(11)
+        int[,] ventPairs = { { 1, 4 }, { 5, 7 }, { 6, 11 } };
+        for (int vi = 0; vi < ventPairs.GetLength(0); vi++)
+        {
+            int ciA = ventPairs[vi, 0];
+            int ciB = ventPairs[vi, 1];
+            var ventGo = new GameObject($"Vent_{comps[ciA].Name}_{comps[ciB].Name}");
+            ventGo.transform.SetParent(compDefs[ciA].transform);
+            ventGo.transform.localPosition = new Vector3(0f, H * 0.5f - 0.3f, 0f);
+            var vd = ventGo.AddComponent<VentDefinition>();
+            vd.CompartmentA = compDefs[ciA];
+            vd.CompartmentB = compDefs[ciB];
+            vd.DuctArea = 0.1f;
+            vd.FanFlowRate = 1.5f;
+            vd.PowerConsumption = 25f;
+            ventGo.AddComponent<VentInteraction>();
+            ventGo.AddComponent<DeviceDegradation>().Compartment = compDefs[ciA];
+            PlaceDeviceConsole(ventGo, new Vector3(0f, 1.5f, 0f), new Vector3(0.8f, 0.4f, 0.8f), new Color(0.6f, 0.6f, 0.8f));
+        }
+
         // Engine
         {
             var engineGo = new GameObject("Engine");
@@ -602,6 +640,8 @@ public static class FloodTestShipBuilder
         playerGo.AddComponent<SuppressionInteraction>();
         playerGo.AddComponent<BallastInteraction>();
         playerGo.AddComponent<ExtinguisherInteraction>();
+        playerGo.AddComponent<CO2ScrubberInteraction>();
+        playerGo.AddComponent<VentInteraction>();
 
         // Ladders (hatch indices 9..14 in opens array)
         for (int i = 9; i < opens.Length; i++)

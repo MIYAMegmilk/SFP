@@ -12,6 +12,7 @@ namespace SFP.Simulation
         public float AirAmount;
         public float AirPressureAtm = 1f;
         public bool IsAirSealed;
+        public float TemperatureK = 293.15f;
 
         public float WaterFraction => Volume > 0f ? WaterVolume / Volume : 0f;
         public float WaterLevelY => FloorY + WaterFraction * Height;

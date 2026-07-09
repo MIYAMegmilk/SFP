@@ -259,6 +259,7 @@ namespace SFP.Gameplay
             else
             {
                 float roomO2 = GetRoomOxygenLevel();
+                float roomCo2 = GetRoomCo2Level();
                 float recoveryMultiplier = roomO2 > 0.2f ? roomO2 : 0f;
                 if (roomO2 < 0.15f)
                 {
@@ -269,6 +270,9 @@ namespace SFP.Gameplay
                     float recovery = OxygenRecoveryRate * recoveryMultiplier;
                     if (RoomPressureAtm > NarcosisPressure)
                         recovery *= 0.5f;
+                    // CO2 drowsiness halves recovery
+                    if (roomCo2 > 0.05f)
+                        recovery *= 0.5f;
                     _oxygen = Mathf.Min(EffectiveMaxOxygen, _oxygen + recovery * Time.deltaTime);
                 }
 
@@ -276,22 +280,36 @@ namespace SFP.Gameplay
                     _oxygen = Mathf.Max(0f, _oxygen - (RoomPressureAtm - ToxicPressure) * 0.5f * Time.deltaTime);
                 if (RoomPressureAtm > LethalPressure)
                     _oxygen = Mathf.Max(0f, _oxygen - (2f + (RoomPressureAtm - LethalPressure)) * Time.deltaTime);
+
+                // CO2 effects: >10% unconsciousness drain, >15% lethal drain
+                if (roomCo2 > 0.10f)
+                    _oxygen = Mathf.Max(0f, _oxygen - Time.deltaTime);
+                if (roomCo2 > 0.15f)
+                    _oxygen = Mathf.Max(0f, _oxygen - 4f * Time.deltaTime);
             }
         }
 
         void UpdateFireDamage()
         {
             var bridge = SimulationBridge.Instance;
-            if (bridge?.FireSystem == null) return;
+            if (bridge == null) return;
 
             int id = _currentCompartmentId;
             if (id < 0) return;
 
-            float heatRate = bridge.FireSystem.GetHeatDamageRate(id);
-            if (heatRate <= 0f) return;
+            if (bridge.FireSystem != null)
+            {
+                float heatRate = bridge.FireSystem.GetHeatDamageRate(id);
+                if (heatRate > 0f)
+                    _oxygen = Mathf.Max(0f, _oxygen - heatRate * Time.deltaTime);
+            }
 
-            // Fire drains oxygen (simulates smoke inhalation and heat stress).
-            _oxygen = Mathf.Max(0f, _oxygen - heatRate * Time.deltaTime);
+            if (bridge.Temperature != null)
+            {
+                float tempK = bridge.Temperature.GetTemperatureK(id);
+                if (tempK > 318f)
+                    _oxygen = Mathf.Max(0f, _oxygen - (tempK - 318f) / 15f * Time.deltaTime);
+            }
         }
 
         void UpdateRoomPressure()
@@ -318,6 +336,17 @@ namespace SFP.Gameplay
 
             bridge.Atmosphere.CrewCompartmentId = id;
             return bridge.Atmosphere.GetOxygenLevel(id);
+        }
+
+        float GetRoomCo2Level()
+        {
+            var bridge = SimulationBridge.Instance;
+            if (bridge?.Atmosphere == null) return 0f;
+
+            int id = GetCurrentCompartmentId();
+            if (id < 0) return 0f;
+
+            return bridge.Atmosphere.GetCo2Level(id);
         }
 
         int GetCurrentCompartmentId()
