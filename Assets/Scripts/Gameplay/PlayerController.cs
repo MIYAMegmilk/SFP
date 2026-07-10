@@ -2,12 +2,15 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
     [RequireComponent(typeof(CharacterController))]
     public class PlayerController : MonoBehaviour
     {
+        public CrewJobKind Job = CrewJobKind.Captain;
+
         public float WalkSpeed = 4f;
         public float SprintMultiplier = 1.8f;
         public float SwimSpeed = 2.5f;
@@ -44,6 +47,7 @@ namespace SFP.Gameplay
         public float LethalPressure = 6f;
 
         public bool HasDivingSuit;
+        public bool IsClimbing;
         public float Oxygen => _oxygen;
         public float OxygenFraction => _oxygen / EffectiveMaxOxygen;
         public bool IsSubmerged => _isSubmerged;
@@ -88,6 +92,13 @@ namespace SFP.Gameplay
             }
 
             HandleLook(mouse);
+
+            if (IsClimbing)
+            {
+                _currentCompartmentId = GetCurrentCompartmentId();
+                UpdateOxygen();
+                return;
+            }
 
             if (IsEVA)
             {

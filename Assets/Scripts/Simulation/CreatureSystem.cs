@@ -51,6 +51,7 @@ namespace SFP.Simulation
         const float WanderTurnRate = 25f; // deg/s max drift
         const float WanderLookAhead = 20f;
         const float WanderAvoidTurn = 150f;
+        const float HullMargin = 2f; // creatures stay this far from hull surface
 
         readonly List<CreatureState> _creatures = new();
         readonly int _seed;
@@ -58,6 +59,9 @@ namespace SFP.Simulation
         int _tickCounter;
 
         public int MaxActiveCreatures = 6;
+        public float HullHalfLength = 12f;
+        public float HullHalfWidth = 3f;
+        public float HullHalfHeight = 9f;
         float _spawnTimer;
         int _spawnCounter;
         int _nextId;
@@ -145,7 +149,12 @@ namespace SFP.Simulation
                 float dz = sub.PositionZ - c.Z;
                 float dDepth = sub.Depth - c.Depth;
                 float dist2D = (float)Math.Sqrt(dx * dx + dz * dz);
-                float rangeMetric = dist2D + Math.Abs(dDepth); // "3D" measure per design: 2D dist + |depth delta|
+
+                // range from hull surface, not center
+                NearestHullPoint(sub, c.X, c.Z, c.Depth, out float hpx, out float hpz, out float hpd);
+                float hdx = hpx - c.X, hdz = hpz - c.Z, hdd = hpd - c.Depth;
+                float hullDist2D = (float)Math.Sqrt(hdx * hdx + hdz * hdz);
+                float rangeMetric = hullDist2D + Math.Abs(hdd);
 
                 if (c.Health < FleeHealthThreshold && c.Behavior != CreatureBehavior.Flee)
                 {
@@ -165,7 +174,7 @@ namespace SFP.Simulation
                         break;
 
                     case CreatureBehavior.Approach:
-                        TickApproach(c, dt, dx, dz, dDepth);
+                        TickApproach(c, dt, sub);
                         if (rangeMetric <= AttackEnterDist)
                             c.Behavior = CreatureBehavior.Attack;
                         else if (dist2D > ApproachGiveUpDist)
@@ -173,7 +182,7 @@ namespace SFP.Simulation
                         break;
 
                     case CreatureBehavior.Attack:
-                        TickAttack(c, dt, dx, dz, dDepth, damage);
+                        TickAttack(c, dt, sub, damage);
                         if (rangeMetric > AttackGiveUpDist)
                             c.Behavior = CreatureBehavior.Approach;
                         break;
@@ -197,6 +206,7 @@ namespace SFP.Simulation
                 }
 
                 ClampToDepthBand(c, terrain);
+                ClampOutsideHull(c, sub);
             }
         }
 
@@ -228,8 +238,13 @@ namespace SFP.Simulation
             c.VelDepth = 0f;
         }
 
-        void TickApproach(CreatureState c, float dt, float dx, float dz, float dDepth)
+        void TickApproach(CreatureState c, float dt, SubmarineState sub)
         {
+            // target nearest hull surface point, not sub center
+            NearestHullPoint(sub, c.X, c.Z, c.Depth, out float hx, out float hz, out float hd);
+            float dx = hx - c.X;
+            float dz = hz - c.Z;
+            float dDepth = hd - c.Depth;
             float len = (float)Math.Sqrt(dx * dx + dz * dz + dDepth * dDepth);
             if (len < 0.01f) return;
 
@@ -244,8 +259,14 @@ namespace SFP.Simulation
             c.VelDepth = vd;
         }
 
-        void TickAttack(CreatureState c, float dt, float dx, float dz, float dDepth, DamageSystem damage)
+        void TickAttack(CreatureState c, float dt, SubmarineState sub, DamageSystem damage)
         {
+            // latch to nearest hull surface point
+            NearestHullPoint(sub, c.X, c.Z, c.Depth, out float hx, out float hz, out float hd);
+            float dx = hx - c.X;
+            float dz = hz - c.Z;
+            float dDepth = hd - c.Depth;
+
             float t = Math.Min(1f, AttackLatchRate * dt);
             float vx = dx * t / Math.Max(dt, 1e-5f);
             float vz = dz * t / Math.Max(dt, 1e-5f);
@@ -280,6 +301,81 @@ namespace SFP.Simulation
             c.VelX = vx;
             c.VelZ = vz;
             c.VelDepth = vd;
+        }
+
+        // Transform world pos to ship-local (heading-aligned) frame,
+        // find nearest point on hull surface, transform back.
+        void NearestHullPoint(SubmarineState sub, float wx, float wz, float wDepth,
+            out float hx, out float hz, out float hDepth)
+        {
+            float dx = wx - sub.PositionX;
+            float dz = wz - sub.PositionZ;
+            float rad = -sub.Heading * (float)(Math.PI / 180.0);
+            float cosH = (float)Math.Cos(rad);
+            float sinH = (float)Math.Sin(rad);
+            // rotate to ship-local: forward = +localX, right = +localZ
+            float localFwd = dx * cosH - dz * sinH;
+            float localRight = dx * sinH + dz * cosH;
+            float localDepth = wDepth - sub.Depth;
+
+            // clamp to hull box
+            float clampF = Math.Clamp(localFwd, -HullHalfLength, HullHalfLength);
+            float clampR = Math.Clamp(localRight, -HullHalfWidth, HullHalfWidth);
+            float clampD = Math.Clamp(localDepth, -HullHalfHeight, HullHalfHeight);
+
+            // nearest point on surface: snap the axis with smallest penetration to its face
+            float penF = HullHalfLength - Math.Abs(clampF);
+            float penR = HullHalfWidth - Math.Abs(clampR);
+            float penD = HullHalfHeight - Math.Abs(clampD);
+
+            if (penF <= penR && penF <= penD)
+                clampF = clampF >= 0 ? HullHalfLength : -HullHalfLength;
+            else if (penR <= penF && penR <= penD)
+                clampR = clampR >= 0 ? HullHalfWidth : -HullHalfWidth;
+            else
+                clampD = clampD >= 0 ? HullHalfHeight : -HullHalfHeight;
+
+            // rotate back to world
+            float invRad = -rad;
+            float cosI = (float)Math.Cos(invRad);
+            float sinI = (float)Math.Sin(invRad);
+            hx = sub.PositionX + clampF * cosI - clampR * sinI;
+            hz = sub.PositionZ + clampF * sinI + clampR * cosI;
+            hDepth = sub.Depth + clampD;
+        }
+
+        bool IsInsideHull(SubmarineState sub, float wx, float wz, float wDepth)
+        {
+            float dx = wx - sub.PositionX;
+            float dz = wz - sub.PositionZ;
+            float rad = -sub.Heading * (float)(Math.PI / 180.0);
+            float cosH = (float)Math.Cos(rad);
+            float sinH = (float)Math.Sin(rad);
+            float localFwd = dx * cosH - dz * sinH;
+            float localRight = dx * sinH + dz * cosH;
+            float localDepth = wDepth - sub.Depth;
+            return Math.Abs(localFwd) < HullHalfLength
+                && Math.Abs(localRight) < HullHalfWidth
+                && Math.Abs(localDepth) < HullHalfHeight;
+        }
+
+        void ClampOutsideHull(CreatureState c, SubmarineState sub)
+        {
+            if (!IsInsideHull(sub, c.X, c.Z, c.Depth)) return;
+            NearestHullPoint(sub, c.X, c.Z, c.Depth, out float hx, out float hz, out float hd);
+            float dx = hx - sub.PositionX;
+            float dz = hz - sub.PositionZ;
+            float len = (float)Math.Sqrt(dx * dx + dz * dz);
+            if (len > 0.01f)
+            {
+                c.X = hx + dx / len * HullMargin;
+                c.Z = hz + dz / len * HullMargin;
+            }
+            else
+            {
+                c.X = hx + HullMargin;
+            }
+            c.Depth = hd;
         }
 
         void ClampToDepthBand(CreatureState c, TerrainModel terrain)

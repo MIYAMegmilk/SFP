@@ -7,69 +7,64 @@ namespace SFP.Gameplay
     public class Pump : MonoBehaviour
     {
         public CompartmentDefinition TargetCompartment;
-        // m³/s. Fixed bilge pump in each compartment (portable pumps are 2×).
         public float PumpRate = 1f;
-        public bool IsActive = true;
+        public bool StartActive = true;
         public float MaxPumpDepth = 800f;
         public float PowerConsumption = 50f;
 
-        int _powerNodeId = -1;
+        public BilgePumpState State { get; private set; }
+
+        static readonly Color ActiveColor = new(0.1f, 0.9f, 0.3f, 1f);
+        static readonly Color InactiveColor = new(0.9f, 0.3f, 0.1f, 1f);
+        MeshRenderer[] _renderers;
+        bool _lastVisualState;
 
         void Start()
         {
             var bridge = SimulationBridge.Instance;
-            if (bridge?.PowerGrid != null)
+            if (bridge == null) return;
+
+            int compId = TargetCompartment != null ? bridge.GetCompartmentId(TargetCompartment) : -1;
+            var node = bridge.PowerGrid?.AddNode(0f, PowerConsumption);
+
+            State = new BilgePumpState
             {
-                var node = bridge.PowerGrid.AddNode(0f, PowerConsumption);
-                _powerNodeId = node.Id;
-            }
+                PowerNodeId = node?.Id ?? -1,
+                CompartmentId = compId,
+                IsActive = StartActive,
+                PumpRate = PumpRate,
+                MaxPumpDepth = MaxPumpDepth,
+                PowerConsumption = PowerConsumption,
+            };
+
+            Vector3 shipLocal = bridge.WorldToShip(transform.position);
+            bridge.RegisterBilgePump(State, shipLocal);
+
+            _renderers = GetComponentsInChildren<MeshRenderer>();
+            _lastVisualState = State.IsActive;
+            UpdateVisual();
         }
 
         void Update()
         {
-            if (!IsActive || TargetCompartment == null) return;
-            var bridge = SimulationBridge.Instance;
-            if (bridge == null) return;
+            if (State == null) return;
 
-            if (_powerNodeId >= 0)
+            if (TryGetComponent<DeviceDegradation>(out var deg))
+                State.IsFunctional = deg.IsFunctional;
+
+            if (State.IsActive != _lastVisualState)
             {
-                var node = bridge.PowerGrid.GetNode(_powerNodeId);
-                if (node != null)
-                {
-                    node.IsEnabled = IsActive;
-                    if (!node.IsActive) return;
-                }
+                _lastVisualState = State.IsActive;
+                UpdateVisual();
             }
+        }
 
-            if (TryGetComponent<DeviceDegradation>(out var deg) && !deg.IsFunctional)
-                return;
-
-            int id = bridge.GetCompartmentId(TargetCompartment);
-            if (id < 0) return;
-
-            float depthFactor = 1f;
-            var sub = bridge.SubState;
-            if (sub != null)
-                depthFactor = Mathf.Clamp01(1f - sub.Depth / MaxPumpDepth);
-            if (depthFactor <= 0f) return;
-
-            float voltageScale = bridge.PowerGrid != null
-                ? Mathf.Clamp01(bridge.PowerGrid.GridVoltage)
-                : 1f;
-            float effectiveRate = PumpRate * depthFactor * voltageScale;
-
-            var grid = bridge.WaterSystem?.GetGrid(id);
-            if (grid != null)
-            {
-                if (grid.TotalVolume() < 0.001f) return;
-                float remove = Mathf.Min(effectiveRate * Time.deltaTime, grid.TotalVolume());
-                grid.AddWaterUniform(-remove);
-            }
-            else
-            {
-                var c = bridge.Graph.GetCompartment(id);
-                c.WaterVolume = Mathf.Max(0f, c.WaterVolume - effectiveRate * Time.deltaTime);
-            }
+        void UpdateVisual()
+        {
+            if (_renderers == null) return;
+            var color = State.IsActive ? ActiveColor : InactiveColor;
+            foreach (var r in _renderers)
+                r.material.color = color;
         }
     }
 }

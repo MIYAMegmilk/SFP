@@ -169,6 +169,7 @@ public static class FloodTestShipBuilder
         // Openings
         var openingsParent = new GameObject("Openings");
         openingsParent.transform.SetParent(hullParent.transform);
+        var openingDefs = new OpeningDefinition[opens.Length];
         for (int i = 0; i < opens.Length; i++)
         {
             var spec = opens[i];
@@ -183,6 +184,7 @@ public static class FloodTestShipBuilder
             def.Area = spec.Area;
             def.Height = spec.Height;
             def.IsOpen = false;
+            openingDefs[i] = def;
 
             bool isDoor = spec.Kind == SFP.Simulation.OpeningKind.Door;
             var visual = go.AddComponent<OpeningVisual>();
@@ -265,6 +267,8 @@ public static class FloodTestShipBuilder
             specCamGo.GetComponent<Camera>().backgroundColor = new Color(0.01f, 0.04f, 0.1f);
             specCamGo.GetComponent<Camera>().clearFlags = CameraClearFlags.SolidColor;
             specCamGo.GetComponent<Camera>().enabled = false;
+            var specListener = specCamGo.GetComponent<AudioListener>();
+            if (specListener != null) Object.DestroyImmediate(specListener);
             specCamGo.AddComponent<FlyCamera>().enabled = false;
             specCamGo.AddComponent<BreachTool>().enabled = false;
             specCamGo.AddComponent<DoorInteraction>().enabled = false;
@@ -324,7 +328,7 @@ public static class FloodTestShipBuilder
             pumpGo.transform.localPosition = new Vector3(1.5f, comps[i].FloorY - comps[i].Center.y + 0.25f, 1.5f);
             var pump = pumpGo.AddComponent<Pump>();
             pump.TargetCompartment = compDefs[i];
-            pump.IsActive = false;
+            pump.StartActive = false;
             AddConsole(pumpGo, new Vector3(0.5f, 0.5f, 0.5f), new Color(0.3f, 0.6f, 0.9f));
         }
 
@@ -435,7 +439,7 @@ public static class FloodTestShipBuilder
             vd.PowerConsumption = 25f;
             ventGo.AddComponent<VentInteraction>();
             ventGo.AddComponent<DeviceDegradation>().Compartment = compDefs[ciA];
-            PlaceDeviceConsole(ventGo, new Vector3(0f, 1.5f, 0f), new Vector3(0.8f, 0.4f, 0.8f), new Color(0.6f, 0.6f, 0.8f));
+            PlaceDeviceConsole(ventGo, new Vector3(-2.2f, 1.5f, -2.2f), new Vector3(0.8f, 0.4f, 0.8f), new Color(0.6f, 0.6f, 0.8f));
         }
 
         // Engine
@@ -642,6 +646,33 @@ public static class FloodTestShipBuilder
         playerGo.AddComponent<ExtinguisherInteraction>();
         playerGo.AddComponent<CO2ScrubberInteraction>();
         playerGo.AddComponent<VentInteraction>();
+        playerGo.AddComponent<CrewCommandInteraction>();
+
+        // Crew visuals manager (under ShipRoot)
+        var crewVisualsGo = new GameObject("CrewVisuals");
+        crewVisualsGo.transform.SetParent(shipRootGo.transform);
+        crewVisualsGo.transform.localPosition = Vector3.zero;
+        crewVisualsGo.transform.localRotation = Quaternion.identity;
+        crewVisualsGo.AddComponent<CrewVisualManager>();
+
+        // Opening state sync (crew-opened doors → visual)
+        bridgeGo.AddComponent<OpeningStateSyncManager>();
+
+        // Crew spawn points (sorted alphabetically for deterministic ids)
+        var spawn1 = new GameObject("CrewSpawn_1");
+        spawn1.transform.SetParent(shipRootGo.transform);
+        spawn1.transform.localPosition = new Vector3(9f, 6f, 3f);
+        spawn1.AddComponent<CrewSpawnDefinition>().Job = SFP.Simulation.CrewJobKind.Engineer;
+
+        var spawn2 = new GameObject("CrewSpawn_2");
+        spawn2.transform.SetParent(shipRootGo.transform);
+        spawn2.transform.localPosition = new Vector3(21f, 6f, 3f);
+        spawn2.AddComponent<CrewSpawnDefinition>().Job = SFP.Simulation.CrewJobKind.Mechanic;
+
+        var spawn3 = new GameObject("CrewSpawn_3");
+        spawn3.transform.SetParent(shipRootGo.transform);
+        spawn3.transform.localPosition = new Vector3(21f, 12f, 3f);
+        spawn3.AddComponent<CrewSpawnDefinition>().Job = SFP.Simulation.CrewJobKind.DamageControl;
 
         // Ladders (hatch indices 9..14 in opens array)
         for (int i = 9; i < opens.Length; i++)
@@ -652,6 +683,7 @@ public static class FloodTestShipBuilder
             ladderGo.transform.position = spec.Pos + new Vector3(0.8f, 0f, 0f);
             var ladder = ladderGo.AddComponent<Ladder>();
             ladder.DeckHeight = H;
+            ladder.Hatch = openingDefs[i];
 
             var triggerGo = new GameObject("LadderTrigger");
             triggerGo.transform.SetParent(ladderGo.transform, false);

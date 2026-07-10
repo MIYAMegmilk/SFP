@@ -14,6 +14,7 @@ namespace SFP.Gameplay
 
         BreachVisual _activeTarget;
         float _sealStartArea;
+        PlayerController _player;
 
         public BreachVisual ActiveTarget => _activeTarget;
         public float DisplayProgress { get; private set; }
@@ -59,16 +60,20 @@ namespace SFP.Gameplay
             bridge.DamageSystem.SetRepairing(breach.Opening.Id, true);
             var stage = bridge.DamageSystem.GetRepairStage(breach.Opening.Id);
 
+            if (_player == null) _player = FindFirstObjectByType<PlayerController>();
+            float prof = _player != null
+                ? CrewJob.GetProficiency(_player.Job, CrewTaskKind.RepairBreach) : 1f;
+
             if (stage == BreachRepairStage.None)
             {
-                bridge.DamageSystem.AddPatchProgress(breach.Opening.Id, PatchRate * Time.deltaTime);
+                bridge.DamageSystem.AddPatchProgress(breach.Opening.Id, PatchRate * prof * Time.deltaTime);
                 DisplayProgress = bridge.DamageSystem.GetPatchProgress(breach.Opening.Id);
                 StageLabel = "PATCHING";
             }
             else
             {
                 var opening = breach.Opening;
-                opening.Area -= SealRate * Time.deltaTime;
+                opening.Area -= SealRate * prof * Time.deltaTime;
                 DisplayProgress = 1f - opening.Area / Mathf.Max(0.01f, _sealStartArea);
                 StageLabel = "WELDING";
 

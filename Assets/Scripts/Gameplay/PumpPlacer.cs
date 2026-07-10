@@ -46,7 +46,7 @@ namespace SFP.Gameplay
             var pump = go.AddComponent<Pump>();
             pump.TargetCompartment = compDef;
             pump.PumpRate = PumpRate;
-            pump.IsActive = true;
+            pump.StartActive = true;
 
             BuildVisual(go);
         }

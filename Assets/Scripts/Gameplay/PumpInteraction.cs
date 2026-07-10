@@ -7,9 +7,6 @@ namespace SFP.Gameplay
     {
         public float MaxDistance = 20f;
 
-        static readonly Color ActiveColor = new(0.1f, 0.9f, 0.3f, 1f);
-        static readonly Color InactiveColor = new(0.9f, 0.3f, 0.1f, 1f);
-
         void Update()
         {
             var kb = Keyboard.current;
@@ -21,21 +18,9 @@ namespace SFP.Gameplay
             if (!Physics.Raycast(ray, out var hit, MaxDistance)) return;
 
             var pump = hit.collider.GetComponentInParent<Pump>();
-            if (pump == null) return;
+            if (pump?.State == null) return;
 
-            pump.IsActive = !pump.IsActive;
-            UpdatePumpVisual(pump);
-        }
-
-        static void UpdatePumpVisual(Pump pump)
-        {
-            var renderers = pump.GetComponentsInChildren<MeshRenderer>();
-            var color = pump.IsActive ? ActiveColor : InactiveColor;
-            foreach (var r in renderers)
-            {
-                var mat = r.material;
-                mat.color = color;
-            }
+            pump.State.IsActive = !pump.State.IsActive;
         }
     }
 }

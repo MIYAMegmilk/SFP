@@ -55,6 +55,39 @@ namespace SFP.Gameplay
                 case "flood":
                     LogFlood(bridge);
                     break;
+                case "crew":
+                    LogCrew(bridge);
+                    break;
+                case "breach":
+                    if (TryInt(parts, 1, out int bComp))
+                    {
+                        float bArea = 0.05f;
+                        if (TryFloat(parts, 2, out float ba)) bArea = ba;
+                        var compDefs = FindObjectsByType<CompartmentDefinition>(FindObjectsSortMode.None);
+                        CompartmentDefinition targetComp = null;
+                        foreach (var cd in compDefs)
+                            if (bridge.GetCompartmentId(cd) == bComp) { targetComp = cd; break; }
+                        if (targetComp != null)
+                        {
+                            var bOpening = bridge.AddBreachAtRuntime(targetComp, bArea, targetComp.FloorY + 0.5f, 0.5f);
+                            if (bOpening != null)
+                                bridge.DamageSystem?.RegisterBreach(bOpening.Id, bArea);
+                            Debug.Log($"[RC] Breach created in compartment {bComp}, area={bArea:F3}");
+                        }
+                        else Debug.Log($"[RC] Compartment {bComp} not found");
+                    }
+                    else Debug.Log("[RC] Usage: breach <compartmentId> [area]");
+                    break;
+                case "fire":
+                    if (TryInt(parts, 1, out int fComp))
+                    {
+                        float fInt = 0.5f;
+                        if (TryFloat(parts, 2, out float fi)) fInt = fi;
+                        bridge.FireSystem?.StartFire(fComp, fInt);
+                        Debug.Log($"[RC] Fire started in compartment {fComp}, intensity={fInt:F2}");
+                    }
+                    else Debug.Log("[RC] Usage: fire <compartmentId> [intensity]");
+                    break;
                 case "throttle":
                     if (TryFloat(parts, 1, out float t))
                     {
@@ -321,10 +354,36 @@ namespace SFP.Gameplay
             Debug.Log(sb.ToString());
         }
 
+        void LogCrew(SimulationBridge bridge)
+        {
+            var system = bridge.CrewSystem;
+            if (system == null) { Debug.Log("[RC] CrewSystem not available"); return; }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== [RC] CREW STATUS ===");
+
+            var crew = system.Crew;
+            for (int i = 0; i < crew.Count; i++)
+            {
+                var c = crew[i];
+                string job = CrewJob.GetLabel(c.Job);
+                string task = c.IsDead ? "DEAD" : c.Task.ToString();
+                sb.AppendLine($"[{c.Id}] {job} HP:{c.Health:F0} O2:{c.Oxygen:F0} Task:{task} Pos:({c.X:F1},{c.Y:F1},{c.Z:F1}) Room:{c.CompartmentId}");
+            }
+            sb.Append("========================");
+            Debug.Log(sb.ToString());
+        }
+
         static bool TryFloat(string[] parts, int index, out float value)
         {
             value = 0f;
             return index < parts.Length && float.TryParse(parts[index], out value);
+        }
+
+        static bool TryInt(string[] parts, int index, out int value)
+        {
+            value = 0;
+            return index < parts.Length && int.TryParse(parts[index], out value);
         }
     }
 }

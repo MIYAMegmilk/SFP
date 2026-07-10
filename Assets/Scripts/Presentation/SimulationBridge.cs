@@ -45,6 +45,9 @@ namespace SFP.Presentation
         FireSystem _fireSystem;
         GasFlowSystem _gasFlow;
         TemperatureSystem _temperature;
+        ShipNavGraph _navGraph;
+        CrewSystem _crewSystem;
+        readonly List<BilgePumpState> _bilgePumps = new();
         readonly System.Collections.Generic.List<CO2ScrubberState> _scrubbers = new();
         readonly System.Collections.Generic.List<VentState> _vents = new();
         readonly System.Collections.Generic.List<TurretState> _turrets = new();
@@ -74,6 +77,9 @@ namespace SFP.Presentation
         public EngineState Engine => _engine;
         public NavigationState Navigation => _navigation;
         public BallastTankState[] Ballasts => _ballasts;
+        public CrewSystem CrewSystem => _crewSystem;
+        public ShipNavGraph NavGraph => _navGraph;
+        public IReadOnlyList<BilgePumpState> BilgePumps => _bilgePumps;
         public float TickDt => _dt;
         public float LastTickMs { get; private set; }
 
@@ -111,6 +117,18 @@ namespace SFP.Presentation
 
                 _prevWaterLevels[c.Id] = c.WaterLevelY;
                 _currWaterLevels[c.Id] = c.WaterLevelY;
+            }
+
+            _navGraph = new ShipNavGraph(_graph);
+            foreach (var def in compartmentDefs)
+            {
+                int cid = _defToId[def];
+                float cx = def.transform.position.x;
+                float cz = def.transform.position.z;
+                float hx = def.LengthX * 0.5f;
+                float hz = def.WidthZ * 0.5f;
+                _navGraph.RegisterRoom(cid, cx - hx, cx + hx, cz - hz, cz + hz,
+                    def.FloorY, def.FloorY + def.Height);
             }
 
             _powerGrid = new PowerGrid();
@@ -155,6 +173,8 @@ namespace SFP.Presentation
                 var o = _graph.AddOpening(def.Kind, idA, idB, def.Area,
                     def.transform.position.y, def.Height, def.IsOpen);
                 def.SimIndex = o.Id;
+                _navGraph.RegisterPortal(o.Id, def.transform.position.x,
+                    def.transform.position.y, def.transform.position.z);
 
                 if (idA != Opening.Sea && idB != Opening.Sea)
                 {
@@ -403,6 +423,26 @@ namespace SFP.Presentation
                 _suppressions.Add(supp);
                 sd.SuppressionIndex = i;
             }
+
+            // Crew AI
+            _crewSystem = new CrewSystem(_graph, _navGraph, MapSeed);
+
+            for (int i = 0; i < reactorDefs.Length; i++)
+            {
+                var rd = reactorDefs[i];
+                int compId = rd.Compartment != null ? GetCompartmentId(rd.Compartment) : -1;
+                _crewSystem.RegisterReactorStation(i, compId,
+                    rd.transform.position.x, rd.transform.position.y, rd.transform.position.z);
+            }
+
+            var crewSpawns = FindObjectsByType<CrewSpawnDefinition>(FindObjectsSortMode.None);
+            System.Array.Sort(crewSpawns, (a, b) =>
+                string.Compare(a.gameObject.name, b.gameObject.name, System.StringComparison.Ordinal));
+            foreach (var cs in crewSpawns)
+            {
+                var pos = cs.transform.position;
+                _crewSystem.SpawnCrew(pos.x, pos.y, pos.z, cs.Job);
+            }
         }
 
         void Update()
@@ -427,6 +467,8 @@ namespace SFP.Presentation
                 }
                 Creatures?.Tick(_dt, _subState, _damageSystem, Terrain, activeSonarPinging, OceanCurrents);
                 _waterSystem.Tick(_dt);
+                for (int i = 0; i < _bilgePumps.Count; i++)
+                    _bilgePumps[i].Tick(_dt, _graph, _waterSystem, _subState, _powerGrid);
                 _engine?.Tick(_dt, _powerGrid);
                 float ballastWater = 0f;
                 for (int i = 0; i < _ballasts.Length; i++)
@@ -464,6 +506,7 @@ namespace SFP.Presentation
                     }
                     _fireSystem.Tick(_dt, _atmosphere, _powerGrid);
                 }
+                _crewSystem?.Tick(_dt, _damageSystem, _fireSystem, _atmosphere, _temperature, _powerGrid);
                 for (int i = 0; i < _turrets.Count; i++)
                     _turrets[i].Tick(_dt, _powerGrid);
                 for (int i = 0; i < _suppressions.Count; i++)
@@ -528,6 +571,12 @@ namespace SFP.Presentation
             return index >= 0 && index < _vents.Count ? _vents[index] : null;
         }
 
+        public void RegisterBilgePump(BilgePumpState state, Vector3 shipLocalPos)
+        {
+            _bilgePumps.Add(state);
+            _crewSystem?.RegisterPump(state, shipLocalPos.x, shipLocalPos.y, shipLocalPos.z);
+        }
+
         public Opening AddBreachAtRuntime(CompartmentDefinition target, float area,
             float centerY, float height)
         {
@@ -551,6 +600,7 @@ namespace SFP.Presentation
                 area, centerY, height);
 
             _waterSystem.AddBreachSource(opening, id, localX, localZ, centerY);
+            _navGraph?.RegisterPortal(opening.Id, localX, centerY, localZ);
 
             return opening;
         }
@@ -579,6 +629,7 @@ namespace SFP.Presentation
             _waterSystem.AddConnection(o, idA, idB,
                 shipLocal.x, shipLocal.z,
                 openingWidth, sillY, isVertical);
+            _navGraph?.RegisterPortal(o.Id, shipLocal.x, shipLocal.y, shipLocal.z);
             return o;
         }
     }

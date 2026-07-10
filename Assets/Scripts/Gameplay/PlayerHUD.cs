@@ -353,11 +353,11 @@ namespace SFP.Gameplay
 
         void DrawNavigationBar(SimulationBridge bridge, GUIStyle baseStyle)
         {
-            if (bridge?.Submarine == null) return;
+            if (bridge?.SubState == null) return;
 
             float sw = Screen.width;
             float sh = Screen.height;
-            var sub = bridge.Submarine;
+            var sub = bridge.SubState;
 
             float navY = sh - 30f;
             if (_player.IsSubmerged) navY = sh - 82f;
