@@ -18,6 +18,9 @@ namespace SFP.Simulation
         internal float WanderHeading;
         internal float AttackTimer;
         internal float FleeTimer;
+        internal float AttackTargetX, AttackTargetZ, AttackTargetDepth;
+        internal bool HasAttackTarget;
+        internal int BiteCount;
     }
 
     public sealed class CreatureSystem
@@ -65,6 +68,14 @@ namespace SFP.Simulation
         float _spawnTimer;
         int _spawnCounter;
         int _nextId;
+
+        // EVA player as attack target
+        public bool HasEVATarget;
+        public float EVAX, EVAZ, EVADepth;
+        const float EVADetectRadius = 60f;
+        const float EVAAttackDist = 4f;
+        const float EVABiteDamage = 15f;
+        public float EVADamageAccumulated;
 
         public IReadOnlyList<CreatureState> Creatures => _creatures;
 
@@ -162,6 +173,15 @@ namespace SFP.Simulation
                     c.FleeTimer = 0f;
                 }
 
+                // Check if EVA player is a closer target
+                float evaDist = float.MaxValue;
+                if (HasEVATarget)
+                {
+                    float edx = EVAX - c.X, edz = EVAZ - c.Z, edd = EVADepth - c.Depth;
+                    evaDist = (float)Math.Sqrt(edx * edx + edz * edz + edd * edd);
+                }
+                bool evaNearer = HasEVATarget && evaDist < rangeMetric && evaDist < EVADetectRadius;
+
                 switch (c.Behavior)
                 {
                     case CreatureBehavior.Patrol:
@@ -169,21 +189,39 @@ namespace SFP.Simulation
                         bool detected = dist2D < DetectionBaseRadius + sub.NoiseLevel * DetectionNoiseScale;
                         if (!detected && activeSonarPinging && dist2D < ActiveSonarAttractRadius)
                             detected = true;
+                        if (!detected && evaNearer)
+                            detected = true;
                         if (detected)
                             c.Behavior = CreatureBehavior.Approach;
                         break;
 
                     case CreatureBehavior.Approach:
-                        TickApproach(c, dt, sub);
-                        if (rangeMetric <= AttackEnterDist)
+                        if (evaNearer)
+                            TickApproachEVA(c, dt);
+                        else
+                            TickApproach(c, dt, sub);
+                        if (evaNearer && evaDist <= EVAAttackDist)
+                        {
                             c.Behavior = CreatureBehavior.Attack;
-                        else if (dist2D > ApproachGiveUpDist)
+                            c.HasAttackTarget = false;
+                            c.BiteCount = 0;
+                        }
+                        else if (rangeMetric <= AttackEnterDist)
+                        {
+                            c.Behavior = CreatureBehavior.Attack;
+                            c.HasAttackTarget = false;
+                            c.BiteCount = 0;
+                        }
+                        else if (dist2D > ApproachGiveUpDist && (!HasEVATarget || evaDist > EVADetectRadius))
                             c.Behavior = CreatureBehavior.Patrol;
                         break;
 
                     case CreatureBehavior.Attack:
-                        TickAttack(c, dt, sub, damage);
-                        if (rangeMetric > AttackGiveUpDist)
+                        if (evaNearer && evaDist < AttackGiveUpDist)
+                            TickAttackEVA(c, dt);
+                        else
+                            TickAttack(c, dt, sub, damage);
+                        if (evaNearer ? evaDist > AttackGiveUpDist : rangeMetric > AttackGiveUpDist)
                             c.Behavior = CreatureBehavior.Approach;
                         break;
 
@@ -259,30 +297,142 @@ namespace SFP.Simulation
             c.VelDepth = vd;
         }
 
+        const float AttackRunSpeed = 12f;
+        const float BiteLatchDist = 3f;
+        const int BitesPerTarget = 2;
+        const float PullBackDist = 15f;
+
         void TickAttack(CreatureState c, float dt, SubmarineState sub, DamageSystem damage)
         {
-            // latch to nearest hull surface point
-            NearestHullPoint(sub, c.X, c.Z, c.Depth, out float hx, out float hz, out float hd);
-            float dx = hx - c.X;
-            float dz = hz - c.Z;
-            float dDepth = hd - c.Depth;
+            if (!c.HasAttackTarget)
+                PickAttackTarget(c, sub);
 
-            float t = Math.Min(1f, AttackLatchRate * dt);
-            float vx = dx * t / Math.Max(dt, 1e-5f);
-            float vz = dz * t / Math.Max(dt, 1e-5f);
-            float vd = dDepth * t / Math.Max(dt, 1e-5f);
-            c.X += dx * t;
-            c.Z += dz * t;
-            c.Depth += dDepth * t;
+            float dx = c.AttackTargetX - c.X;
+            float dz = c.AttackTargetZ - c.Z;
+            float dDepth = c.AttackTargetDepth - c.Depth;
+            float dist = (float)Math.Sqrt(dx * dx + dz * dz + dDepth * dDepth);
+
+            if (dist > BiteLatchDist)
+            {
+                // Swim toward target point on hull
+                float spd = AttackRunSpeed;
+                float inv = spd / Math.Max(dist, 0.01f);
+                float vx = dx * inv;
+                float vz = dz * inv;
+                float vd = dDepth * inv;
+                c.X += vx * dt;
+                c.Z += vz * dt;
+                c.Depth += vd * dt;
+                c.VelX = vx;
+                c.VelZ = vz;
+                c.VelDepth = vd;
+            }
+            else
+            {
+                // Close enough — bite
+                c.AttackTimer += dt;
+                if (c.AttackTimer >= BiteInterval)
+                {
+                    c.AttackTimer = 0f;
+                    c.BiteCount++;
+                    damage?.ApplyCreatureBite(BiteMagnitude);
+
+                    if (c.BiteCount >= BitesPerTarget)
+                    {
+                        c.BiteCount = 0;
+                        c.HasAttackTarget = false;
+                    }
+                }
+
+                // Drift slowly along hull while biting
+                NearestHullPoint(sub, c.X, c.Z, c.Depth, out float hx, out float hz, out float hd);
+                float t = Math.Min(1f, AttackLatchRate * 0.5f * dt);
+                c.X += (hx - c.X) * t;
+                c.Z += (hz - c.Z) * t;
+                c.Depth += (hd - c.Depth) * t;
+            }
+        }
+
+        void PickAttackTarget(CreatureState c, SubmarineState sub)
+        {
+            // Pick a random point on the hull surface
+            float hf = HashToSigned(c.Id, _tickCounter + 301, _seed + 50011);
+            float hr = HashToSigned(c.Id, _tickCounter + 302, _seed + 50011);
+            float hd = HashToSigned(c.Id, _tickCounter + 303, _seed + 50011);
+
+            // Random point in ship-local box, then snap to nearest face
+            float localFwd = hf * HullHalfLength;
+            float localRight = hr * HullHalfWidth;
+            float localDepth = hd * HullHalfHeight;
+
+            float penF = HullHalfLength - Math.Abs(localFwd);
+            float penR = HullHalfWidth - Math.Abs(localRight);
+            float penD = HullHalfHeight - Math.Abs(localDepth);
+
+            if (penF <= penR && penF <= penD)
+                localFwd = localFwd >= 0 ? HullHalfLength : -HullHalfLength;
+            else if (penR <= penF && penR <= penD)
+                localRight = localRight >= 0 ? HullHalfWidth : -HullHalfWidth;
+            else
+                localDepth = localDepth >= 0 ? HullHalfHeight : -HullHalfHeight;
+
+            // Add margin so creature stays outside hull
+            float margin = HullMargin;
+            if (Math.Abs(localFwd) >= HullHalfLength - 0.1f)
+                localFwd += localFwd >= 0 ? margin : -margin;
+            if (Math.Abs(localRight) >= HullHalfWidth - 0.1f)
+                localRight += localRight >= 0 ? margin : -margin;
+            if (Math.Abs(localDepth) >= HullHalfHeight - 0.1f)
+                localDepth += localDepth >= 0 ? margin : -margin;
+
+            // Rotate back to world
+            float rad = -sub.Heading * (float)(Math.PI / 180.0);
+            float cosI = (float)Math.Cos(-rad);
+            float sinI = (float)Math.Sin(-rad);
+            c.AttackTargetX = sub.PositionX + localFwd * cosI - localRight * sinI;
+            c.AttackTargetZ = sub.PositionZ + localFwd * sinI + localRight * cosI;
+            c.AttackTargetDepth = sub.Depth + localDepth;
+            c.HasAttackTarget = true;
+        }
+
+        void TickApproachEVA(CreatureState c, float dt)
+        {
+            float dx = EVAX - c.X;
+            float dz = EVAZ - c.Z;
+            float dDepth = EVADepth - c.Depth;
+            float len = (float)Math.Sqrt(dx * dx + dz * dz + dDepth * dDepth);
+            if (len < 0.01f) return;
+
+            float vx = dx / len * ApproachSpeed;
+            float vz = dz / len * ApproachSpeed;
+            float vd = dDepth / len * ApproachSpeed;
+            c.X += vx * dt;
+            c.Z += vz * dt;
+            c.Depth += vd * dt;
             c.VelX = vx;
             c.VelZ = vz;
             c.VelDepth = vd;
+        }
+
+        void TickAttackEVA(CreatureState c, float dt)
+        {
+            float dx = EVAX - c.X;
+            float dz = EVAZ - c.Z;
+            float dDepth = EVADepth - c.Depth;
+
+            float t = Math.Min(1f, AttackLatchRate * dt);
+            c.X += dx * t;
+            c.Z += dz * t;
+            c.Depth += dDepth * t;
+            c.VelX = dx * t / Math.Max(dt, 1e-5f);
+            c.VelZ = dz * t / Math.Max(dt, 1e-5f);
+            c.VelDepth = dDepth * t / Math.Max(dt, 1e-5f);
 
             c.AttackTimer += dt;
             if (c.AttackTimer >= BiteInterval)
             {
                 c.AttackTimer = 0f;
-                damage?.ApplyCreatureBite(BiteMagnitude);
+                EVADamageAccumulated += EVABiteDamage;
             }
         }
 

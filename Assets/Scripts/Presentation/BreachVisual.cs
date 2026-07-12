@@ -12,6 +12,8 @@ namespace SFP.Presentation
 
         static Material _edgeMat;
         static Material _holeMat;
+        static Material _exteriorMarkerMat;
+        GameObject _exteriorMarker;
 
         // Stored in this transform's local space (aligned with the wall face via
         // LookRotation(hit.normal)) so Rebuild positions survive ship movement/rotation.
@@ -71,6 +73,12 @@ namespace SFP.Presentation
             _axB = (_thin + 2) % 3;
             _valid = true;
 
+            if (_exteriorMarkerMat == null)
+            {
+                _exteriorMarkerMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                _exteriorMarkerMat.color = new Color(1f, 0.2f, 0.1f, 1f);
+            }
+
             Rebuild();
         }
 
@@ -98,6 +106,8 @@ namespace SFP.Presentation
                 if (go) Destroy(go);
             _managed.Clear();
 
+            if (_exteriorMarker != null) { Destroy(_exteriorMarker); _exteriorMarker = null; }
+
             var emitter = GetComponent<PhysicsWaterEmitter>();
             if (emitter != null) Destroy(emitter);
 
@@ -112,6 +122,7 @@ namespace SFP.Presentation
         {
             foreach (var go in _managed)
                 if (go) Destroy(go);
+            if (_exteriorMarker != null) Destroy(_exteriorMarker);
         }
 
         void Rebuild()
@@ -154,6 +165,23 @@ namespace SFP.Presentation
             MakeEdge(aMin - e, aMax + e, bMin - e, bMin + e, edgeThin);
             MakeEdge(aMin - e, aMin + e, bMin, bMax, edgeThin);
             MakeEdge(aMax - e, aMax + e, bMin, bMax, edgeThin);
+
+            RebuildExteriorMarker(holeSide);
+        }
+
+        void RebuildExteriorMarker(float holeSide)
+        {
+            if (_exteriorMarker != null) Destroy(_exteriorMarker);
+
+            // forward = wall inward normal; exterior is -forward (local Z negative)
+            _exteriorMarker = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            _exteriorMarker.name = "ExteriorBreachMarker";
+            Destroy(_exteriorMarker.GetComponent<Collider>());
+            _exteriorMarker.GetComponent<MeshRenderer>().sharedMaterial = _exteriorMarkerMat;
+            _exteriorMarker.transform.SetParent(transform, false);
+            float markerSize = Mathf.Max(holeSide * 1.5f, 0.4f);
+            _exteriorMarker.transform.localPosition = new Vector3(0f, 0f, -0.6f);
+            _exteriorMarker.transform.localScale = new Vector3(markerSize, markerSize, 0.05f);
         }
 
         void MakeEdge(float aMin, float aMax, float bMin, float bMax, float thinSize)

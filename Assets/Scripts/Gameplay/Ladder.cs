@@ -13,8 +13,8 @@ namespace SFP.Gameplay
 
         bool _isClimbing;
         PlayerController _climber;
-        float _floorY;
-        float _ceilingY;
+        float _lowerFloorY;
+        float _hatchY;
 
         void Update()
         {
@@ -45,17 +45,21 @@ namespace SFP.Gameplay
             _climber.IsClimbing = true;
             _isClimbing = true;
 
-            float hatchY = transform.position.y;
-            _floorY = hatchY - DeckHeight;
-            _ceilingY = hatchY + DeckHeight;
+            _hatchY = transform.position.y;
+            _lowerFloorY = _hatchY - DeckHeight;
+
+            // Snap player XZ to hatch position so they pass through the opening
+            Vector3 snapXZ = Hatch != null
+                ? new Vector3(Hatch.transform.position.x, 0f, Hatch.transform.position.z)
+                : new Vector3(transform.position.x, 0f, transform.position.z);
 
             var cc = _climber.GetComponent<CharacterController>();
             if (cc != null)
             {
                 cc.enabled = false;
                 var pos = _climber.transform.position;
-                pos.x = transform.position.x;
-                pos.z = transform.position.z;
+                pos.x = snapXZ.x;
+                pos.z = snapXZ.z;
                 _climber.transform.position = pos;
                 cc.enabled = true;
             }
@@ -79,56 +83,53 @@ namespace SFP.Gameplay
             }
 
             if (kb.escapeKey.wasPressedThisFrame || kb.eKey.wasPressedThisFrame
-                || kb.sKey.wasPressedThisFrame)
+                || kb.spaceKey.wasPressedThisFrame)
             {
                 StopClimb();
                 return;
             }
 
-            if (!kb.wKey.isPressed) return;
-            var cam = Camera.main;
-            float input = (cam != null && cam.transform.forward.y >= 0f) ? 1f : -1f;
+            float input = 0f;
+            if (kb.wKey.isPressed) input += 1f;
+            if (kb.sKey.isPressed || kb.leftCtrlKey.isPressed) input -= 1f;
+            if (input == 0f) return;
 
-            float hatchY = transform.position.y;
             float playerY = _climber.transform.position.y;
             float newY = playerY + input * ClimbSpeed * Time.deltaTime;
+            bool hatchOpen = IsHatchOpen();
 
             if (input > 0f)
             {
-                bool hatchOpen = IsHatchOpen();
-                if (!hatchOpen)
+                if (!hatchOpen && playerY < _hatchY)
                 {
-                    // 1.6 = eye height; head hits ceiling at hatch level
-                    float headLimit = hatchY - 1.6f;
+                    float headLimit = _hatchY - 1.6f;
                     if (newY > headLimit) newY = headLimit;
                 }
-                else
+                else if (hatchOpen && newY >= _hatchY + 0.1f)
                 {
-                    if (newY > _ceilingY) newY = _ceilingY;
-                }
-
-                // arrived on upper deck
-                if (hatchOpen && newY >= hatchY + 0.1f)
-                {
-                    newY = hatchY + 0.1f;
-                    ApplyPosition(newY);
+                    ApplyPosition(_hatchY + 0.1f);
                     StopClimb();
                     return;
                 }
+
+                float ceiling = _hatchY + DeckHeight;
+                if (newY > ceiling) newY = ceiling;
             }
             else
             {
-                if (newY < _floorY)
-                    newY = _floorY;
-
-                // arrived on lower deck
-                if (newY <= _floorY + 0.1f)
+                if (!hatchOpen && playerY >= _hatchY)
                 {
-                    newY = _floorY + 0.1f;
-                    ApplyPosition(newY);
+                    float feetLimit = _hatchY + 0.1f;
+                    if (newY < feetLimit) newY = feetLimit;
+                }
+                else if (newY <= _lowerFloorY + 0.1f)
+                {
+                    ApplyPosition(_lowerFloorY + 0.1f);
                     StopClimb();
                     return;
                 }
+
+                if (newY < _lowerFloorY) newY = _lowerFloorY;
             }
 
             ApplyPosition(newY);
@@ -152,9 +153,7 @@ namespace SFP.Gameplay
             {
                 cc.enabled = false;
                 var pos = _climber.transform.position;
-                pos.x = transform.position.x;
                 pos.y = y;
-                pos.z = transform.position.z;
                 _climber.transform.position = pos;
                 cc.enabled = true;
             }
@@ -173,7 +172,9 @@ namespace SFP.Gameplay
         {
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(transform.position, InteractRadius);
-            Gizmos.DrawLine(transform.position, transform.position + Vector3.up * DeckHeight);
+            Gizmos.DrawLine(
+                transform.position + Vector3.down * DeckHeight,
+                transform.position + Vector3.up * DeckHeight);
         }
     }
 }

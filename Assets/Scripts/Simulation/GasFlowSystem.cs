@@ -131,6 +131,7 @@ namespace SFP.Simulation
             foreach (var o in _graph.Openings)
             {
                 if (!o.IsOpen) continue;
+                if (o.IsGasSealed) continue;
                 int compId;
                 if (o.CompartmentA == Opening.Sea && o.CompartmentB != Opening.Sea)
                     compId = o.CompartmentB;

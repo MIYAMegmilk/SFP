@@ -12,6 +12,9 @@ namespace SFP.Simulation
         public float CenterY;
         public float Height;
         public bool IsOpen;
+        public bool IsLocked;
+        // Bottom-mounted valve with baffle — water passes but gas cannot
+        public bool IsGasSealed;
         public float FlowQ;
         public float FlowVelocity;
         public float FlowScale = 1f;

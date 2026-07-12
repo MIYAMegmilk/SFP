@@ -11,6 +11,7 @@ namespace SFP.Presentation
         public float Area = 1f;
         public float Height = 2f;
         public bool IsOpen = true;
+        public bool IsGasSealed;
         [HideInInspector] public int SimIndex = -1;
 
         void OnDrawGizmos()

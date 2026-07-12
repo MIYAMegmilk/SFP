@@ -31,6 +31,7 @@ namespace SFP.Gameplay
             if (openingDef.SimIndex >= 0 && bridge != null)
             {
                 var opening = bridge.Graph.Openings[openingDef.SimIndex];
+                if (opening.IsLocked) return;
                 opening.IsOpen = !opening.IsOpen;
                 openingDef.IsOpen = opening.IsOpen;
             }

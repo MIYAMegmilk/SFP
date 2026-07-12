@@ -830,7 +830,7 @@ namespace SFP.Simulation
                         c.DoorTimer += dt;
                         if (c.DoorTimer >= DoorOperateTime)
                         {
-                            opening.IsOpen = true;
+                            if (!opening.IsLocked) opening.IsOpen = true;
                             c.DoorTimer = 0f;
                         }
                         // stand still while opening
