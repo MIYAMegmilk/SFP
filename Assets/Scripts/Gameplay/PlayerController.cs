@@ -56,7 +56,15 @@ namespace SFP.Gameplay
         public int CurrentCompartmentId => _currentCompartmentId;
 
         public float SuitCrushDepth = 300f;
+        public float EVABuoyancy = 0.4f;
+        public float EVADepthDragScale = 200f;
+        public float TetherMaxLength = 30f;
         public bool IsEVA { get; private set; }
+        public bool TetherAttached { get; private set; }
+        public float TetherLength { get; private set; }
+        Transform _evaReturnParent;
+        Vector3 _tetherAnchorWorld;
+        LineRenderer _tetherLine;
 
         void Start()
         {
@@ -114,7 +122,22 @@ namespace SFP.Gameplay
                     _evaCurrentPush = new Vector3(cx, 0f, cz);
                 }
 
+                if (evaBridge?.Creatures != null)
+                {
+                    var creatures = evaBridge.Creatures;
+                    creatures.HasEVATarget = true;
+                    creatures.EVAX = transform.position.x;
+                    creatures.EVAZ = transform.position.z;
+                    creatures.EVADepth = -transform.position.y;
+                    if (creatures.EVADamageAccumulated > 0f)
+                    {
+                        ApplyEVADamage(creatures.EVADamageAccumulated);
+                        creatures.EVADamageAccumulated = 0f;
+                    }
+                }
+
                 UpdateSwimming(kb);
+                UpdateTether();
 
                 if (transform.position.y > -0.5f)
                 {
@@ -126,6 +149,9 @@ namespace SFP.Gameplay
             else
             {
                 _evaCurrentPush = Vector3.zero;
+                var clearBridge = SimulationBridge.Instance;
+                if (clearBridge?.Creatures != null)
+                    clearBridge.Creatures.HasEVATarget = false;
                 _currentCompartmentId = GetCurrentCompartmentId();
                 float waterY = GetWaterLevelAtPosition(_currentCompartmentId);
                 // waterY is ship-local; convert the player's head position to ship-local before comparing.
@@ -142,22 +168,46 @@ namespace SFP.Gameplay
 
             UpdateOxygen();
             UpdateFireDamage();
+            UpdateHeadlamp(kb);
         }
 
-        public void EnterEVA(Vector3 exteriorPosition)
+        public void EnterEVA(Vector3 exteriorWorldPos)
         {
             _cc.enabled = false;
-            transform.position = exteriorPosition;
+            _evaReturnParent = transform.parent;
+            transform.SetParent(null, true);
+            transform.position = exteriorWorldPos;
             _cc.enabled = true;
             IsEVA = true;
+            _tetherAnchorWorld = exteriorWorldPos;
+            TetherAttached = true;
+            CreateHeadlamp();
+            CreateTetherLine();
         }
 
-        public void ExitEVA(Vector3 interiorPosition)
+        public void ExitEVA(Vector3 interiorShipLocal)
         {
             _cc.enabled = false;
-            transform.position = interiorPosition;
+            transform.SetParent(_evaReturnParent, true);
+            var bridge = SimulationBridge.Instance;
+            if (bridge != null)
+                transform.position = bridge.ShipToWorld(interiorShipLocal);
+            else
+                transform.localPosition = interiorShipLocal;
             _cc.enabled = true;
             IsEVA = false;
+            TetherAttached = false;
+            DestroyHeadlamp();
+            DestroyTetherLine();
+        }
+
+        public void ApplyEVADamage(float damage)
+        {
+            _oxygen = Mathf.Max(0f, _oxygen - damage);
+            if (TetherAttached && damage >= 10f)
+            {
+                TetherAttached = false;
+            }
         }
 
         void HandleLook(Mouse mouse)
@@ -207,10 +257,19 @@ namespace SFP.Gameplay
             Vector3 swimDir = _cameraTransform.TransformDirection(input);
             swimDir.y += vertical;
 
+            if (IsEVA && vertical == 0f && input.sqrMagnitude < 0.01f)
+                swimDir.y += EVABuoyancy;
+
             if (swimDir.sqrMagnitude > 1f)
                 swimDir.Normalize();
 
             float swimSpd = HasDivingSuit ? SwimSpeed * DivingSuitSpeedPenalty : SwimSpeed;
+            if (IsEVA)
+            {
+                // Pressure drag: speed halves every EVADepthDragScale metres
+                float depth = -transform.position.y;
+                swimSpd /= (1f + depth / EVADepthDragScale);
+            }
             _verticalVelocity = 0f;
             Vector3 flow = SampleWaterFlow();
             _cc.Move((swimDir * swimSpd + flow + _evaCurrentPush) * Time.deltaTime);
@@ -422,6 +481,117 @@ namespace SFP.Gameplay
             center = shipRoot.InverseTransformPoint(comp.transform.position);
             _compShipLocalCenter[comp] = center;
             return center;
+        }
+
+        // --- Headlamp ---
+
+        Light _headlamp;
+        public bool HeadlampOn { get; private set; }
+
+        void UpdateHeadlamp(Keyboard kb)
+        {
+            if (!IsEVA || _headlamp == null) return;
+            if (kb.fKey.wasPressedThisFrame)
+            {
+                HeadlampOn = !HeadlampOn;
+                _headlamp.enabled = HeadlampOn;
+            }
+        }
+
+        void CreateHeadlamp()
+        {
+            if (_headlamp != null) return;
+            var lampGo = new GameObject("Headlamp");
+            lampGo.transform.SetParent(_cameraTransform, false);
+            lampGo.transform.localPosition = Vector3.zero;
+            lampGo.transform.localRotation = Quaternion.identity;
+            _headlamp = lampGo.AddComponent<Light>();
+            _headlamp.type = LightType.Spot;
+            _headlamp.spotAngle = 60f;
+            _headlamp.innerSpotAngle = 30f;
+            _headlamp.range = 40f;
+            _headlamp.intensity = 800f;
+            _headlamp.color = new Color(0.85f, 0.95f, 1f);
+            _headlamp.shadows = LightShadows.Soft;
+            _headlamp.enabled = true;
+            HeadlampOn = true;
+            SFP.Presentation.BackscatterLightManager.RegisterLight(_headlamp);
+        }
+
+        void DestroyHeadlamp()
+        {
+            if (_headlamp != null)
+            {
+                SFP.Presentation.BackscatterLightManager.UnregisterLight(_headlamp);
+                Destroy(_headlamp.gameObject);
+                _headlamp = null;
+            }
+            HeadlampOn = false;
+        }
+
+        // --- Tether ---
+
+        void UpdateTether()
+        {
+            if (!TetherAttached)
+            {
+                TetherLength = 0f;
+                UpdateTetherVisual();
+                return;
+            }
+
+            // Anchor tracks the hatch world position (sub may have moved)
+            var bridge = SimulationBridge.Instance;
+            if (bridge != null)
+                _tetherAnchorWorld = bridge.ShipToWorld(new Vector3(21f, 0.5f, 4.5f));
+
+            TetherLength = Vector3.Distance(transform.position, _tetherAnchorWorld);
+
+            if (TetherLength > TetherMaxLength)
+            {
+                // Pull player back toward anchor
+                Vector3 dir = (_tetherAnchorWorld - transform.position).normalized;
+                float excess = TetherLength - TetherMaxLength;
+                _cc.Move(dir * excess * 0.5f);
+            }
+
+            UpdateTetherVisual();
+        }
+
+        void CreateTetherLine()
+        {
+            if (_tetherLine != null) return;
+            var go = new GameObject("TetherLine");
+            go.transform.SetParent(null);
+            _tetherLine = go.AddComponent<LineRenderer>();
+            _tetherLine.positionCount = 2;
+            _tetherLine.startWidth = 0.03f;
+            _tetherLine.endWidth = 0.03f;
+            _tetherLine.material = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            _tetherLine.material.color = new Color(0.9f, 0.8f, 0.2f);
+            _tetherLine.useWorldSpace = true;
+        }
+
+        void DestroyTetherLine()
+        {
+            if (_tetherLine != null)
+            {
+                Destroy(_tetherLine.gameObject);
+                _tetherLine = null;
+            }
+        }
+
+        void UpdateTetherVisual()
+        {
+            if (_tetherLine == null) return;
+            if (!TetherAttached)
+            {
+                _tetherLine.enabled = false;
+                return;
+            }
+            _tetherLine.enabled = true;
+            _tetherLine.SetPosition(0, _tetherAnchorWorld);
+            _tetherLine.SetPosition(1, transform.position + Vector3.up * 0.5f);
         }
     }
 }

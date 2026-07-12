@@ -48,6 +48,7 @@ namespace SFP.Presentation
         ShipNavGraph _navGraph;
         CrewSystem _crewSystem;
         readonly List<BilgePumpState> _bilgePumps = new();
+        readonly List<AirlockState> _airlocks = new();
         readonly System.Collections.Generic.List<CO2ScrubberState> _scrubbers = new();
         readonly System.Collections.Generic.List<VentState> _vents = new();
         readonly System.Collections.Generic.List<TurretState> _turrets = new();
@@ -80,6 +81,7 @@ namespace SFP.Presentation
         public CrewSystem CrewSystem => _crewSystem;
         public ShipNavGraph NavGraph => _navGraph;
         public IReadOnlyList<BilgePumpState> BilgePumps => _bilgePumps;
+        public IReadOnlyList<AirlockState> Airlocks => _airlocks;
         public float TickDt => _dt;
         public float LastTickMs { get; private set; }
 
@@ -173,6 +175,7 @@ namespace SFP.Presentation
                 var o = _graph.AddOpening(def.Kind, idA, idB, def.Area,
                     def.transform.position.y, def.Height, def.IsOpen);
                 def.SimIndex = o.Id;
+                o.IsGasSealed = def.IsGasSealed;
                 _navGraph.RegisterPortal(o.Id, def.transform.position.x,
                     def.transform.position.y, def.transform.position.z);
 
@@ -406,6 +409,44 @@ namespace SFP.Presentation
                 td.TurretIndex = i;
             }
 
+            // Airlock systems
+            var airlockDefs = FindObjectsByType<AirlockDefinition>(FindObjectsSortMode.None);
+            for (int i = 0; i < airlockDefs.Length; i++)
+            {
+                var ad = airlockDefs[i];
+                var aNode = _powerGrid.AddNode(0f, ad.PowerConsumption);
+                var state = new AirlockState
+                {
+                    CompartmentId = ad.Compartment != null ? GetCompartmentId(ad.Compartment) : -1,
+                    InnerDoorOpeningId = ad.InnerDoor != null ? ad.InnerDoor.SimIndex : -1,
+                    OuterHatchOpeningId = ad.OuterHatch != null ? ad.OuterHatch.SimIndex : -1,
+                    FloodValveOpeningId = ad.FloodValve != null ? ad.FloodValve.SimIndex : -1,
+                    PowerNodeId = aNode.Id,
+                    PowerConsumption = ad.PowerConsumption,
+                };
+                _airlocks.Add(state);
+                ad.AirlockIndex = i;
+            }
+
+            // Register authored sea-facing openings as breach sources (hatches/valves, not runtime breaches)
+            foreach (var def in openingDefs)
+            {
+                int idA = def.CompartmentA != null ? _defToId[def.CompartmentA] : Opening.Sea;
+                int idB = def.CompartmentB != null ? _defToId[def.CompartmentB] : Opening.Sea;
+                if (idA == Opening.Sea && idB != Opening.Sea)
+                {
+                    var pos = def.transform.position;
+                    float sillY = pos.y - def.Height * 0.5f;
+                    _waterSystem.AddBreachSource(_graph.Openings[def.SimIndex], idB, pos.x, pos.z, sillY);
+                }
+                else if (idB == Opening.Sea && idA != Opening.Sea)
+                {
+                    var pos = def.transform.position;
+                    float sillY = pos.y - def.Height * 0.5f;
+                    _waterSystem.AddBreachSource(_graph.Openings[def.SimIndex], idA, pos.x, pos.z, sillY);
+                }
+            }
+
             var suppDefs = FindObjectsByType<SuppressionSystemDefinition>(FindObjectsSortMode.None);
             for (int i = 0; i < suppDefs.Length; i++)
             {
@@ -469,6 +510,8 @@ namespace SFP.Presentation
                 _waterSystem.Tick(_dt);
                 for (int i = 0; i < _bilgePumps.Count; i++)
                     _bilgePumps[i].Tick(_dt, _graph, _waterSystem, _subState, _powerGrid);
+                for (int i = 0; i < _airlocks.Count; i++)
+                    _airlocks[i].Tick(_dt, _graph, _waterSystem, _subState, _powerGrid);
                 _engine?.Tick(_dt, _powerGrid);
                 float ballastWater = 0f;
                 for (int i = 0; i < _ballasts.Length; i++)
@@ -536,6 +579,29 @@ namespace SFP.Presentation
             return _idToDef.TryGetValue(id, out var def) ? def : null;
         }
 
+        // Returns the compartment ID containing the given ship-local position, or -1 if none.
+        public int FindCompartmentAt(Vector3 shipLocalPos)
+        {
+            foreach (var kvp in _idToDef)
+            {
+                int id = kvp.Key;
+                CompartmentDefinition def = kvp.Value;
+
+                float cx = def.transform.localPosition.x;
+                float cz = def.transform.localPosition.z;
+                float hx = def.LengthX * 0.5f;
+                float hz = def.WidthZ * 0.5f;
+
+                if (shipLocalPos.x >= cx - hx && shipLocalPos.x <= cx + hx &&
+                    shipLocalPos.y >= def.FloorY && shipLocalPos.y <= def.FloorY + def.Height &&
+                    shipLocalPos.z >= cz - hz && shipLocalPos.z <= cz + hz)
+                {
+                    return id;
+                }
+            }
+            return -1;
+        }
+
         public OxygenGeneratorState GetOxygenGenerator(int index)
         {
             return index >= 0 && index < _oxygenGenerators.Count ? _oxygenGenerators[index] : null;
@@ -569,6 +635,11 @@ namespace SFP.Presentation
         public VentState GetVent(int index)
         {
             return index >= 0 && index < _vents.Count ? _vents[index] : null;
+        }
+
+        public AirlockState GetAirlock(int index)
+        {
+            return index >= 0 && index < _airlocks.Count ? _airlocks[index] : null;
         }
 
         public void RegisterBilgePump(BilgePumpState state, Vector3 shipLocalPos)

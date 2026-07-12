@@ -1,0 +1,90 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-8475330246013191239
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 65919e3e288f96e4db6e6892ddb5987e, type: 3}
+  m_Name: UnderwaterVolumeComponent
+  m_EditorClassIdentifier: SFP.Presentation::SFP.Presentation.UnderwaterVolumeComponent
+  active: 1
+  intensity:
+    m_OverrideState: 0
+    m_Value: 1
+  absorptionCoeff:
+    m_OverrideState: 0
+    m_Value: {x: 0.45, y: 0.065, z: 0.0044}
+  turbidity:
+    m_OverrideState: 1
+    m_Value: 0.4
+  kdSun:
+    m_OverrideState: 0
+    m_Value: {x: 0.35, y: 0.07, z: 0.017}
+  scatterColor:
+    m_OverrideState: 1
+    m_Value: {r: 0.12, g: 0.3, b: 0.25, a: 1}
+  visibilityFloor:
+    m_OverrideState: 0
+    m_Value: {r: 0.004, g: 0.01, b: 0.016, a: 1}
+  maxViewDistance:
+    m_OverrideState: 0
+    m_Value: 200
+  causticsIntensity:
+    m_OverrideState: 1
+    m_Value: 0
+  causticsScale:
+    m_OverrideState: 0
+    m_Value: 3
+  causticsSpeed:
+    m_OverrideState: 0
+    m_Value: 0.35
+  causticsFade:
+    m_OverrideState: 0
+    m_Value: {x: 5, y: 30}
+  godRayIntensity:
+    m_OverrideState: 1
+    m_Value: 0
+  godRayDecay:
+    m_OverrideState: 0
+    m_Value: 0.94
+  godRayMaxDepth:
+    m_OverrideState: 0
+    m_Value: 60
+  distortAmplitude:
+    m_OverrideState: 0
+    m_Value: 0.0018
+  distortFrequency:
+    m_OverrideState: 0
+    m_Value: 22
+  distortSpeed:
+    m_OverrideState: 0
+    m_Value: 1.2
+  backscatterIntensity:
+    m_OverrideState: 0
+    m_Value: 1
+  backscatterDensity:
+    m_OverrideState: 0
+    m_Value: 0.02
+  marineSnowDensity:
+    m_OverrideState: 1
+    m_Value: 0
+  quality: 2
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d7fd9488000d3734a9e00ee676215985, type: 3}
+  m_Name: UnderwaterInteriorProfile
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.VolumeProfile
+  components:
+  - {fileID: -8475330246013191239}

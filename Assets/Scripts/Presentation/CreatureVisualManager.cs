@@ -9,8 +9,13 @@ namespace SFP.Presentation
         static readonly Color BaseColor = new Color(0.22f, 0.08f, 0.06f, 1f);
         static readonly Color BaseEmission = new Color(0.35f, 0.05f, 0.03f, 1f);
         static readonly Color AttackEmission = new Color(1f, 0.05f, 0.02f, 1f);
+        // Bioluminescence: cyan glow that intensifies with depth (design doc §5.3)
+        static readonly Color BioLumColor = new Color(0.05f, 0.4f, 0.5f, 1f);
+        const float BioLumStartDepth = 200f;
+        const float BioLumFullDepth = 800f;
         const float BaseIntensity = 0.5f;
         const float AttackIntensity = 3.5f;
+        const float BioLumIntensity = 2f;
         const float EmissionLerpSpeed = 4f;
 
         sealed class Visual
@@ -72,6 +77,11 @@ namespace SFP.Presentation
                     Time.deltaTime * EmissionLerpSpeed);
                 Color emission = Color.Lerp(BaseEmission * BaseIntensity, AttackEmission * AttackIntensity,
                     vis.EmissionT);
+
+                // Bioluminescence overlay: adds cyan glow at depth
+                float bioFactor = Mathf.InverseLerp(BioLumStartDepth, BioLumFullDepth, creature.Depth);
+                emission += BioLumColor * (bioFactor * BioLumIntensity);
+
                 vis.BodyMat.SetColor("_EmissionColor", emission);
             }
 

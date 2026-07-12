@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using SFP.Presentation;
@@ -32,6 +33,10 @@ public static class FloodTestShipBuilder
 
     static void DoBuild()
     {
+        // Registers the underwater renderer feature + generates its Volume profiles if this is
+        // the first build in a fresh checkout (idempotent, design doc §9).
+        UnderwaterRenderingSetup.EnsureSetup();
+
         var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 
         var comps = new CompSpec[]
@@ -75,6 +80,9 @@ public static class FloodTestShipBuilder
             new() { Name = "Hatch_M0_U0", A = 4, B = 8,  Pos = new(3f,  12f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
             new() { Name = "Hatch_M1_U1", A = 5, B = 9,  Pos = new(9f,  12f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
             new() { Name = "Hatch_M2_U2", A = 6, B = 10, Pos = new(15f, 12f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
+            // Airlock sea openings (A=-1 → Sea)
+            new() { Name = "OuterHatch_Airlock", A = 3, B = -1, Pos = new(21f, 0.5f, 4.5f), Area = 0.8f, Height = 1f, Kind = SFP.Simulation.OpeningKind.Hatch },
+            new() { Name = "FloodValve_Airlock", A = 3, B = -1, Pos = new(21f, 0.2f, 1.0f), Area = 0.2f, Height = 0.4f, Kind = SFP.Simulation.OpeningKind.Hatch },
         };
 
         // Load kit prefabs
@@ -104,7 +112,7 @@ public static class FloodTestShipBuilder
         // under this transform. ShipRootDriver moves/rotates it every frame from
         // SimulationBridge.SubState so the whole ship physically travels through the ocean world
         // (M6 Phase 1) instead of being represented by a separate remote proxy. Environment
-        // content (Terrain, Mines, Creatures, UnderwaterAmbience) and the spectator camera stay
+        // content (Terrain, Mines, Creatures, UnderwaterEnvironment) and the spectator camera stay
         // outside it, at world/map coordinates.
         var shipRootGo = new GameObject("ShipRoot");
         shipRootGo.AddComponent<ShipRootDriver>();
@@ -154,6 +162,8 @@ public static class FloodTestShipBuilder
             for (int bx = 0; bx <= 4; bx++)
             {
                 float x = bx * L;
+                // Skip east exterior wall on upper deck — replaced by window assembly
+                if (deck == 2 && bx == 4) continue;
                 var prefab = wallPlain;
                 PlaceWallX(structParent.transform, prefab, x, floorY, 0f);
             }
@@ -221,6 +231,17 @@ public static class FloodTestShipBuilder
                 visual.ClosedOffsetR = new Vector3( halfSide * 0.5f, 0, 0);
                 visual.OpenOffsetL   = new Vector3(-halfSide * 1.5f, 0, 0);
                 visual.OpenOffsetR   = new Vector3( halfSide * 1.5f, 0, 0);
+
+                // Underside invisible trigger — raycastable from the deck below
+                if (spec.B != -1)
+                {
+                    var handle = new GameObject("HatchHandleTrigger");
+                    handle.transform.SetParent(go.transform);
+                    handle.transform.localPosition = new Vector3(0f, -0.4f, 0f);
+                    var box = handle.AddComponent<BoxCollider>();
+                    box.size = new Vector3(0.6f, 0.3f, 0.6f);
+                    box.isTrigger = true;
+                }
             }
         }
 
@@ -245,7 +266,7 @@ public static class FloodTestShipBuilder
         // room is survivable by blowing tanks.
         simBridge.SubmarineDryMass = 1025f * (2800f - 240f);
         simBridge.ShipRootRef = shipRootGo.transform;
-        bridgeGo.AddComponent<DebugOverlay>();
+        bridgeGo.AddComponent<SFP.Presentation.DebugOverlay>();
         bridgeGo.AddComponent<DamageEventPresenter>();
         bridgeGo.AddComponent<FlowVisualManager>();
         var bsm = bridgeGo.AddComponent<BuiltStructureManager>();
@@ -600,6 +621,27 @@ public static class FloodTestShipBuilder
             PlaceDeviceConsole(lockerGo, new Vector3(2.5f, -2.0f, 0f), new Vector3(1.0f, 2.0f, 0.6f), new Color(0.9f, 0.5f, 0.1f));
         }
 
+        // Airlock console + definition
+        {
+            OpeningDefinition outerHatchDef = null, floodValveDef = null, innerDoorDef = null;
+            for (int i = 0; i < openingDefs.Length; i++)
+            {
+                if (opens[i].Name == "OuterHatch_Airlock") outerHatchDef = openingDefs[i];
+                else if (opens[i].Name == "FloodValve_Airlock") { floodValveDef = openingDefs[i]; floodValveDef.IsGasSealed = true; }
+                else if (opens[i].Name == "Door_L2_L3") innerDoorDef = openingDefs[i];
+            }
+
+            var airlockGo = new GameObject("AirlockConsole");
+            airlockGo.transform.SetParent(compDefs[3].transform);
+            var ad = airlockGo.AddComponent<AirlockDefinition>();
+            ad.Compartment = compDefs[3];
+            ad.InnerDoor = innerDoorDef;
+            ad.OuterHatch = outerHatchDef;
+            ad.FloodValve = floodValveDef;
+            ad.PowerConsumption = 200f;
+            PlaceDeviceConsole(airlockGo, new Vector3(-2.5f, -1.5f, 2.3f), new Vector3(0.6f, 1.2f, 0.6f), new Color(0.2f, 0.8f, 0.8f));
+        }
+
         // Turret
         {
             var turretGo = new GameObject("Turret_Coilgun");
@@ -647,6 +689,8 @@ public static class FloodTestShipBuilder
         playerGo.AddComponent<CO2ScrubberInteraction>();
         playerGo.AddComponent<VentInteraction>();
         playerGo.AddComponent<CrewCommandInteraction>();
+        playerGo.AddComponent<AirlockInteraction>();
+        playerGo.AddComponent<EVAWeaponController>();
 
         // Crew visuals manager (under ShipRoot)
         var crewVisualsGo = new GameObject("CrewVisuals");
@@ -811,8 +855,123 @@ public static class FloodTestShipBuilder
         // West & east walls (span the full outer Y/Z).
         Slab("ShellWest", new Vector3((ox0 + minX) * 0.5f, (oy0 + oy1) * 0.5f, (oz0 + oz1) * 0.5f),
             new Vector3(minX - ox0, oy1 - oy0, oz1 - oz0));
-        Slab("ShellEast", new Vector3((maxX + ox1) * 0.5f, (oy0 + oy1) * 0.5f, (oz0 + oz1) * 0.5f),
-            new Vector3(ox1 - maxX, oy1 - oy0, oz1 - oz0));
+
+        // East wall (bow): split around the Bridge window opening.
+        const float winY0 = 13.5f, winY1 = 16.5f; // 3m tall, centered on Bridge eye-level
+        const float winZ0 = 1.0f, winZ1 = 5.0f;   // 4m wide, centered on z=3
+        float eastThick = ox1 - maxX;
+        float eastCX = (maxX + ox1) * 0.5f;
+        // Bottom strip (full Z, below window)
+        Slab("ShellEast_Bottom", new Vector3(eastCX, (oy0 + winY0) * 0.5f, (oz0 + oz1) * 0.5f),
+            new Vector3(eastThick, winY0 - oy0, oz1 - oz0));
+        // Top strip (full Z, above window)
+        Slab("ShellEast_Top", new Vector3(eastCX, (winY1 + oy1) * 0.5f, (oz0 + oz1) * 0.5f),
+            new Vector3(eastThick, oy1 - winY1, oz1 - oz0));
+        // Left pillar (south side of window)
+        Slab("ShellEast_Left", new Vector3(eastCX, (winY0 + winY1) * 0.5f, (oz0 + winZ0) * 0.5f),
+            new Vector3(eastThick, winY1 - winY0, winZ0 - oz0));
+        // Right pillar (north side of window)
+        Slab("ShellEast_Right", new Vector3(eastCX, (winY0 + winY1) * 0.5f, (winZ1 + oz1) * 0.5f),
+            new Vector3(eastThick, winY1 - winY0, oz1 - winZ1));
+
+        // Glass window panel — URP/Lit transparent requires full keyword + property setup
+        var glassMat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        glassMat.SetFloat("_Surface", 1f);
+        glassMat.SetFloat("_Blend", 0f);
+        glassMat.SetFloat("_AlphaClip", 0f);
+        glassMat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        glassMat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        glassMat.SetFloat("_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+        glassMat.SetFloat("_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        glassMat.SetFloat("_ZWrite", 0f);
+        glassMat.SetFloat("_Smoothness", 0.95f);
+        glassMat.SetFloat("_Metallic", 0f);
+        glassMat.SetOverrideTag("RenderType", "Transparent");
+        glassMat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        glassMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        glassMat.SetShaderPassEnabled("ShadowCaster", false);
+        glassMat.color = new Color(0.55f, 0.8f, 0.85f, 0.35f);
+        glassMat.SetColor("_EmissionColor", new Color(0.05f, 0.12f, 0.15f, 1f));
+        glassMat.EnableKeyword("_EMISSION");
+        glassMat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+        AssetDatabase.CreateAsset(glassMat, "Assets/Materials/Glass.mat");
+
+        // Glass panel — flush with interior wall face so it's visible from inside
+        var windowGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        windowGo.name = "BridgeWindow";
+        var windowCol = windowGo.GetComponent<BoxCollider>();
+        windowCol.isTrigger = false; // solid — blocks player
+        windowGo.GetComponent<MeshRenderer>().sharedMaterial = glassMat;
+        windowGo.transform.SetParent(shellParent.transform, false);
+        windowGo.transform.localPosition = new Vector3(maxX, (winY0 + winY1) * 0.5f, (winZ0 + winZ1) * 0.5f);
+        windowGo.transform.localScale = new Vector3(0.1f, winY1 - winY0, winZ1 - winZ0);
+
+        // Window frame — interior trim panels so the opening doesn't look bare
+        var frameMat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        frameMat.color = new Color(0.25f, 0.28f, 0.32f, 1f);
+        frameMat.SetFloat("_Metallic", 0.6f);
+        frameMat.SetFloat("_Smoothness", 0.4f);
+        AssetDatabase.CreateAsset(frameMat, "Assets/Materials/WindowFrame.mat");
+
+        float frameDepth = 0.15f; // frame protrusion into room
+        float frameThick = 0.2f;  // frame band width
+        float winCY = (winY0 + winY1) * 0.5f;
+        float winCZ = (winZ0 + winZ1) * 0.5f;
+        float winH = winY1 - winY0;
+        float winW = winZ1 - winZ0;
+        float frameX = maxX - frameDepth * 0.5f;
+
+        void FramePanel(string name, Vector3 pos, Vector3 size)
+        {
+            var fp = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            fp.name = name;
+            Object.DestroyImmediate(fp.GetComponent<Collider>());
+            fp.GetComponent<MeshRenderer>().sharedMaterial = frameMat;
+            fp.transform.SetParent(shellParent.transform, false);
+            fp.transform.localPosition = pos;
+            fp.transform.localScale = size;
+        }
+
+        // Bottom frame
+        FramePanel("WinFrame_Bottom", new Vector3(frameX, winY0 - frameThick * 0.5f, winCZ),
+            new Vector3(frameDepth, frameThick, winW + frameThick * 2f));
+        // Top frame
+        FramePanel("WinFrame_Top", new Vector3(frameX, winY1 + frameThick * 0.5f, winCZ),
+            new Vector3(frameDepth, frameThick, winW + frameThick * 2f));
+        // Left frame (south)
+        FramePanel("WinFrame_Left", new Vector3(frameX, winCY, winZ0 - frameThick * 0.5f),
+            new Vector3(frameDepth, winH, frameThick));
+        // Right frame (north)
+        FramePanel("WinFrame_Right", new Vector3(frameX, winCY, winZ1 + frameThick * 0.5f),
+            new Vector3(frameDepth, winH, frameThick));
+
+        // Fill the rest of the east wall face (around window) with interior panels
+        // so it doesn't look like a bare hull backface
+        void InteriorPanel(string name, Vector3 pos, Vector3 size)
+        {
+            var ip = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            ip.name = name;
+            Object.DestroyImmediate(ip.GetComponent<Collider>());
+            ip.GetComponent<MeshRenderer>().sharedMaterial = hullMat;
+            ip.transform.SetParent(shellParent.transform, false);
+            ip.transform.localPosition = pos;
+            ip.transform.localScale = size;
+        }
+
+        // Interior wall below window (covers deck 2 area: y=12..13.5)
+        float intX = maxX - 0.05f; // thin panel at interior face
+        float intThick = 0.1f;
+        InteriorPanel("EastWall_BelowWin", new Vector3(intX, (12f + winY0) * 0.5f, 3f),
+            new Vector3(intThick, winY0 - 12f, W));
+        // Interior wall above window (y=16.5..18)
+        InteriorPanel("EastWall_AboveWin", new Vector3(intX, (winY1 + 18f) * 0.5f, 3f),
+            new Vector3(intThick, 18f - winY1, W));
+        // Interior wall left of window (z=0..1)
+        InteriorPanel("EastWall_LeftWin", new Vector3(intX, winCY, winZ0 * 0.5f),
+            new Vector3(intThick, winH, winZ0));
+        // Interior wall right of window (z=5..6)
+        InteriorPanel("EastWall_RightWin", new Vector3(intX, winCY, (winZ1 + W) * 0.5f),
+            new Vector3(intThick, winH, W - winZ1));
         // South & north walls (span the full outer X/Y).
         Slab("ShellSouth", new Vector3((ox0 + ox1) * 0.5f, (oy0 + oy1) * 0.5f, (oz0 + minZ) * 0.5f),
             new Vector3(ox1 - ox0, oy1 - oy0, minZ - oz0));
@@ -860,6 +1019,9 @@ public static class FloodTestShipBuilder
         light.intensity = 4f;
         light.color = new Color(1f, 0.95f, 0.8f);
         light.shadows = LightShadows.None;
+
+        // Self-register for backscatter light cone rendering at runtime
+        go.AddComponent<BackscatterLightRegistrar>();
     }
 
     // ===== Environment =====
@@ -888,9 +1050,52 @@ public static class FloodTestShipBuilder
         creaturesGo.transform.SetParent(envParent.transform);
         creaturesGo.AddComponent<CreatureVisualManager>();
 
-        var underwaterAmbienceGo = new GameObject("UnderwaterAmbience");
-        underwaterAmbienceGo.transform.SetParent(envParent.transform);
-        underwaterAmbienceGo.AddComponent<UnderwaterAmbience>();
+        // Replaces UnderwaterAmbience (design doc §6.1): drives ambient/fog/sun and the _SFP*
+        // shader globals the Underwater renderer feature reads.
+        var underwaterEnvGo = new GameObject("UnderwaterEnvironment");
+        underwaterEnvGo.transform.SetParent(envParent.transform);
+        underwaterEnvGo.AddComponent<UnderwaterEnvironmentController>();
+
+        // Marine snow: camera-following particle box for deep-ocean atmosphere (§5.1)
+        var snowGo = new GameObject("MarineSnow");
+        snowGo.transform.SetParent(envParent.transform);
+        snowGo.AddComponent<MarineSnowController>();
+
+        // Backscatter: selects top-4 spot lights and feeds shader arrays (§6.3)
+        var bsGo = new GameObject("BackscatterLightManager");
+        bsGo.transform.SetParent(envParent.transform);
+        bsGo.AddComponent<BackscatterLightManager>();
+
+        BuildUnderwaterVolumes(envParent.transform);
+    }
+
+    // Global Volumes carrying the Underwater optical profiles (design doc §4.3). Ocean is the
+    // exterior baseline at fixed weight 1; Interior starts at weight 0 and is driven upward at
+    // runtime by UnderwaterEnvironmentController while the camera is submerged inside a flooded
+    // compartment, so the two profiles cross-blend automatically.
+    static void BuildUnderwaterVolumes(Transform envParent)
+    {
+        var oceanProfile = AssetDatabase.LoadAssetAtPath<VolumeProfile>("Assets/Settings/UnderwaterOceanProfile.asset");
+        var interiorProfile = AssetDatabase.LoadAssetAtPath<VolumeProfile>("Assets/Settings/UnderwaterInteriorProfile.asset");
+
+        var volumesGo = new GameObject("UnderwaterVolumes");
+        volumesGo.transform.SetParent(envParent);
+
+        var oceanGo = new GameObject("UnderwaterOcean");
+        oceanGo.transform.SetParent(volumesGo.transform);
+        var oceanVolume = oceanGo.AddComponent<Volume>();
+        oceanVolume.isGlobal = true;
+        oceanVolume.priority = 10f;
+        oceanVolume.weight = 1f;
+        oceanVolume.sharedProfile = oceanProfile;
+
+        var interiorGo = new GameObject("UnderwaterInterior");
+        interiorGo.transform.SetParent(volumesGo.transform);
+        var interiorVolume = interiorGo.AddComponent<Volume>();
+        interiorVolume.isGlobal = true;
+        interiorVolume.priority = 20f;
+        interiorVolume.weight = 0f; // Controller manages weight at runtime
+        interiorVolume.sharedProfile = interiorProfile;
     }
 
     static GameObject CreatePanel(string name, Transform parent, Vector3 localPos, Vector3 scale, Material mat)
