@@ -34,7 +34,12 @@ namespace SFP.Simulation
 
         public float Range => IsPassive ? PassiveRange : ActiveRange;
 
-        public void Tick(float dt, PowerGrid power, SubmarineState sub, TerrainModel terrain = null, MineSystem mines = null, CreatureSystem creatures = null)
+        // Flow noise: fraction of range lost to current-induced acoustic interference.
+        // At 2 m/s current, lose ~30% of effective range.
+        public float FlowNoiseAttenuation { get; private set; }
+        public float EffectiveRange => Range * (1f - FlowNoiseAttenuation);
+
+        public void Tick(float dt, PowerGrid power, SubmarineState sub, TerrainModel terrain = null, MineSystem mines = null, CreatureSystem creatures = null, OceanCurrentField currents = null)
         {
             if (!IsActive)
             {
@@ -55,6 +60,19 @@ namespace SFP.Simulation
                 HasPower = true;
             }
 
+            // Flow noise: strong currents degrade sonar performance
+            if (currents != null)
+            {
+                currents.Sample(sub.PositionX, sub.PositionZ, sub.Depth, out float cx, out float cz);
+                float currentSpeed = (float)Math.Sqrt(cx * cx + cz * cz);
+                // Quadratic degradation: 0% at 0 m/s, ~30% at 2 m/s, caps at 50%
+                FlowNoiseAttenuation = (float)Math.Min(0.5, 0.075 * currentSpeed * currentSpeed);
+            }
+            else
+            {
+                FlowNoiseAttenuation = 0f;
+            }
+
             _pingTimer += dt;
             if (_pingTimer >= PingInterval)
             {
@@ -68,7 +86,7 @@ namespace SFP.Simulation
         {
             _contacts.Clear();
 
-            float range = Range;
+            float range = EffectiveRange;
 
             if (terrain != null && terrain.Map != null)
             {

@@ -140,7 +140,7 @@ namespace SFP.Gameplay
             float cx = Screen.width * 0.5f;
             float top = Screen.height * 0.25f;
             float panelW = 300f;
-            float panelH = 240f;
+            float panelH = 290f;
             if (showWaypoint) panelH += 40f;
 
             // Fused console (Tier 2+): the sonar UI is open alongside on the same console —
@@ -227,6 +227,38 @@ namespace SFP.Gameplay
                 y += 20f;
                 GUI.Label(new Rect(lx, y, panelW, 20), "(N: next  M: autopilot to mission)", style);
                 y += 22f;
+            }
+
+            // Ocean current vector display
+            if (bridge.OceanCurrents != null)
+            {
+                bridge.OceanCurrents.Sample(sub.PositionX, sub.PositionZ, sub.Depth,
+                    out float curVx, out float curVz);
+                float curSpeed = Mathf.Sqrt(curVx * curVx + curVz * curVz);
+                float curBearing = Mathf.Atan2(curVx, curVz) * Mathf.Rad2Deg;
+                if (curBearing < 0f) curBearing += 360f;
+                float relAngle = Mathf.DeltaAngle(sub.Heading, curBearing);
+
+                string flowDir = relAngle > 135f || relAngle < -135f ? "HEAD"
+                    : relAngle > 45f ? "STBD" : relAngle < -45f ? "PORT" : "TAIL";
+                Color curColor = curSpeed > 1.0f ? new Color(1f, 0.6f, 0.2f)
+                    : curSpeed > 0.5f ? new Color(0.5f, 0.9f, 1f) : new Color(0.4f, 0.7f, 0.7f);
+                var curStyle = new GUIStyle(style) { normal = { textColor = curColor } };
+                GUI.Label(new Rect(lx, y, panelW, 20),
+                    $"Current: {curSpeed:F1}m/s  {curBearing:F0}° ({flowDir})", curStyle);
+                y += 20f;
+
+                // Arrow indicator showing current direction relative to heading
+                float arrowCx = cx;
+                float arrowCy = y + 12f;
+                float arrowR = 10f;
+                float arrowRad = (curBearing - sub.Heading) * Mathf.Deg2Rad;
+                float ax = arrowCx + Mathf.Sin(arrowRad) * arrowR;
+                float ay = arrowCy - Mathf.Cos(arrowRad) * arrowR;
+                GUI.color = curColor;
+                GUI.DrawTexture(new Rect(ax - 3, ay - 3, 6, 6), Texture2D.whiteTexture);
+                GUI.color = Color.white;
+                y += 26f;
             }
 
             var hintStyle = new GUIStyle(GUI.skin.label)

@@ -333,8 +333,23 @@ namespace SFP.Gameplay
                 fontSize = 10,
                 normal = { textColor = new Color(0f, 0.8f, 0f, 0.6f) }
             };
-            GUI.Label(new Rect(cx + 3, cy - radius + 2, 60, 15), $"{state.Range:F0}m", infoStyle);
-            GUI.Label(new Rect(cx + 3, cy - radius * 0.5f + 2, 60, 15), $"{state.Range * 0.5f:F0}m", infoStyle);
+            GUI.Label(new Rect(cx + 3, cy - radius + 2, 80, 15), $"{state.EffectiveRange:F0}m", infoStyle);
+            GUI.Label(new Rect(cx + 3, cy - radius * 0.5f + 2, 80, 15), $"{state.EffectiveRange * 0.5f:F0}m", infoStyle);
+
+            // Flow noise warning
+            if (state.FlowNoiseAttenuation > 0.05f)
+            {
+                Color noiseColor = state.FlowNoiseAttenuation > 0.2f
+                    ? new Color(1f, 0.4f, 0.2f, 0.9f) : new Color(1f, 0.8f, 0.3f, 0.7f);
+                var noiseStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = 10,
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = noiseColor }
+                };
+                GUI.Label(new Rect(cx - 60, cy + radius + 28, 120, 14),
+                    $"FLOW NOISE -{state.FlowNoiseAttenuation * 100f:F0}%", noiseStyle);
+            }
 
             // Vertical profile panel (YZ slice along the sub's heading), to the right of the circle.
             if (map != null && _profileTex != null)

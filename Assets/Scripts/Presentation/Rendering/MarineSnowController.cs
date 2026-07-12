@@ -108,10 +108,24 @@ namespace SFP.Presentation
         {
             if (bridge.OceanCurrents == null) return;
 
-            bridge.OceanCurrents.Sample(
-                bridge.SubState.PositionX,
-                bridge.SubState.PositionZ,
-                bridge.SubState.Depth,
+            // Sample at camera's actual world position so particles match the
+            // depth-varying current field (not the ship's depth)
+            var cam = Camera.main;
+            float sampleX, sampleZ, sampleDepth;
+            if (cam != null)
+            {
+                sampleX = cam.transform.position.x;
+                sampleZ = cam.transform.position.z;
+                sampleDepth = Mathf.Max(0f, -cam.transform.position.y);
+            }
+            else
+            {
+                sampleX = bridge.SubState.PositionX;
+                sampleZ = bridge.SubState.PositionZ;
+                sampleDepth = bridge.SubState.Depth;
+            }
+
+            bridge.OceanCurrents.Sample(sampleX, sampleZ, sampleDepth,
                 out float cx, out float cz);
 
             // Scale down for gentle particle drift (currents are in m/s for the submarine)

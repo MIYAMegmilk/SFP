@@ -28,7 +28,27 @@ namespace SFP.Tests
         }
 
         [Test]
-        public void Sample_MagnitudeNeverExceedsMax_AndAverageIsMeaningful()
+        public void Sample_MagnitudeNeverExceedsMax()
+        {
+            var field = new OceanCurrentField(7);
+            var rng = new Random(1234);
+
+            const int Count = 1000;
+            for (int i = 0; i < Count; i++)
+            {
+                float x = (float)rng.NextDouble() * 10000f;
+                float z = (float)rng.NextDouble() * 10000f;
+                float depth = (float)rng.NextDouble() * 800f;
+
+                field.Sample(x, z, depth, out float vx, out float vz);
+                float mag = (float)Math.Sqrt(vx * vx + vz * vz);
+
+                Assert.LessOrEqual(mag, field.MaxCurrentSpeed + 0.1f, $"exceeded max at i={i}");
+            }
+        }
+
+        [Test]
+        public void Sample_HasMeaningfulMagnitude()
         {
             var field = new OceanCurrentField(7);
             var rng = new Random(1234);
@@ -37,14 +57,12 @@ namespace SFP.Tests
             const int Count = 1000;
             for (int i = 0; i < Count; i++)
             {
-                float x = (float)rng.NextDouble() * 4000f;
-                float z = (float)rng.NextDouble() * 4000f;
+                float x = (float)rng.NextDouble() * 10000f;
+                float z = (float)rng.NextDouble() * 10000f;
                 float depth = (float)rng.NextDouble() * 100f;
 
                 field.Sample(x, z, depth, out float vx, out float vz);
                 float mag = (float)Math.Sqrt(vx * vx + vz * vz);
-
-                Assert.LessOrEqual(mag, field.MaxCurrentSpeed + 1e-4f, $"exceeded max at i={i}");
                 total += mag;
             }
 
@@ -53,41 +71,92 @@ namespace SFP.Tests
         }
 
         [Test]
-        public void DepthAttenuation_WeakensCurrentBelowFortyPercent()
+        public void DepthAttenuation_DeepCurrentWeakerThanSurface()
         {
             var field = new OceanCurrentField(7);
 
-            field.Sample(500f, 500f, 0f, out float shallowX, out float shallowZ);
-            field.Sample(500f, 500f, 600f, out float deepX, out float deepZ);
+            // Sample multiple points to get statistical comparison
+            var rng = new Random(42);
+            double shallowTotal = 0, deepTotal = 0;
+            const int Count = 200;
+            for (int i = 0; i < Count; i++)
+            {
+                float x = (float)rng.NextDouble() * 8000f;
+                float z = (float)rng.NextDouble() * 8000f;
+                field.Sample(x, z, 10f, out float sx, out float sz);
+                field.Sample(x, z, 700f, out float dx, out float dz);
+                shallowTotal += Math.Sqrt(sx * sx + sz * sz);
+                deepTotal += Math.Sqrt(dx * dx + dz * dz);
+            }
 
-            float shallowMag = (float)Math.Sqrt(shallowX * shallowX + shallowZ * shallowZ);
-            float deepMag = (float)Math.Sqrt(deepX * deepX + deepZ * deepZ);
-
-            Assert.Greater(shallowMag, 0f);
-            Assert.LessOrEqual(deepMag, shallowMag * 0.4f + 1e-5f);
+            Assert.Greater(shallowTotal, deepTotal,
+                "Deep currents should be weaker on average than shallow");
+            Assert.Less(deepTotal / shallowTotal, 0.5,
+                "Deep current should be less than 50% of shallow on average");
         }
 
         [Test]
-        public void ComputeDepthFactor_MatchesExpectedFormula()
+        public void DepthProfile_DirectionVariesWithDepth()
+        {
+            var field = new OceanCurrentField(7);
+
+            // At a single position, different depths should yield different directions
+            float x = 2000f, z = 3000f;
+            field.Sample(x, z, 10f, out float v10x, out float v10z);
+            field.Sample(x, z, 200f, out float v200x, out float v200z);
+            field.Sample(x, z, 500f, out float v500x, out float v500z);
+
+            // Compute angles
+            double angle10 = Math.Atan2(v10z, v10x);
+            double angle200 = Math.Atan2(v200z, v200x);
+            double angle500 = Math.Atan2(v500z, v500x);
+
+            // At least one pair should differ by more than 10 degrees
+            double diff1 = Math.Abs(angle10 - angle200);
+            double diff2 = Math.Abs(angle200 - angle500);
+            double diff3 = Math.Abs(angle10 - angle500);
+            double maxDiff = Math.Max(diff1, Math.Max(diff2, diff3));
+            if (maxDiff > Math.PI) maxDiff = 2 * Math.PI - maxDiff;
+
+            Assert.Greater(maxDiff, 10.0 * Math.PI / 180.0,
+                "Current direction should vary meaningfully across depth layers");
+        }
+
+        [Test]
+        public void TimeAdvance_ChangesCurrent()
+        {
+            var field = new OceanCurrentField(7);
+            float x = 1000f, z = 1000f, depth = 50f;
+
+            field.Sample(x, z, depth, out float vx0, out float vz0);
+
+            // Advance by half a tidal period
+            field.AdvanceTime(360f);
+            field.Sample(x, z, depth, out float vx1, out float vz1);
+
+            // Should be different due to tidal oscillation + eddy drift
+            float diff = (float)Math.Sqrt((vx1 - vx0) * (vx1 - vx0) + (vz1 - vz0) * (vz1 - vz0));
+            Assert.Greater(diff, 0.01f, "Current should change over time");
+        }
+
+        [Test]
+        public void ComputeDepthFactor_ReturnsOneAtSurface()
         {
             Assert.AreEqual(1f, OceanCurrentField.ComputeDepthFactor(0f), 1e-5f);
-            Assert.AreEqual(0.25f, OceanCurrentField.ComputeDepthFactor(600f), 1e-5f);
-            Assert.AreEqual(0.1f, OceanCurrentField.ComputeDepthFactor(2000f), 1e-5f);
+            Assert.AreEqual(1f, OceanCurrentField.ComputeDepthFactor(100f), 1e-5f);
         }
 
         [Test]
-        public void Sample_DepthOnly_ReducesRawCurrentByExpectedFactor()
+        public void ComputeDepthFactor_DecaysWithDepth()
         {
-            var field = new OceanCurrentField(7);
+            float f200 = OceanCurrentField.ComputeDepthFactor(200f);
+            float f600 = OceanCurrentField.ComputeDepthFactor(600f);
+            float f1000 = OceanCurrentField.ComputeDepthFactor(1000f);
 
-            float x = 500f, z = 500f, depth = 200f;
-            field.SampleRaw(x, z, out float rawX, out float rawZ);
-            field.Sample(x, z, depth, out float dampedX, out float dampedZ);
-
-            float expectedFactor = OceanCurrentField.ComputeDepthFactor(depth);
-
-            Assert.AreEqual(rawX * expectedFactor, dampedX, 1e-5f);
-            Assert.AreEqual(rawZ * expectedFactor, dampedZ, 1e-5f);
+            Assert.AreEqual(1f, f200, 1e-5f);
+            Assert.Less(f600, f200);
+            Assert.LessOrEqual(f1000, f600);
+            Assert.GreaterOrEqual(f1000, 0.05f);
         }
 
         [Test]

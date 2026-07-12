@@ -41,6 +41,7 @@ namespace SFP.Presentation
         NavigationState _navigation;
         BallastTankState[] _ballasts = System.Array.Empty<BallastTankState>();
         readonly System.Collections.Generic.List<SonarState> _sonars = new();
+        readonly System.Collections.Generic.List<ADCPState> _adcps = new();
         readonly System.Collections.Generic.List<FabricatorState> _fabricators = new();
         FireSystem _fireSystem;
         GasFlowSystem _gasFlow;
@@ -303,6 +304,21 @@ namespace SFP.Presentation
                     sonarAudio.Init(sonar);
             }
 
+            var adcpDefs = FindObjectsByType<ADCPDefinition>(FindObjectsSortMode.None);
+            for (int i = 0; i < adcpDefs.Length; i++)
+            {
+                var ad = adcpDefs[i];
+                var aNode = _powerGrid.AddNode(0f, ad.PowerConsumption);
+                var adcpState = new ADCPState
+                {
+                    PowerNodeId = aNode.Id,
+                    PowerConsumption = ad.PowerConsumption,
+                    MaxRange = ad.MaxRange,
+                };
+                _adcps.Add(adcpState);
+                ad.ADCPIndex = i;
+            }
+
             var fabDefs = FindObjectsByType<FabricatorDefinition>(FindObjectsSortMode.None);
             for (int i = 0; i < fabDefs.Length; i++)
             {
@@ -523,6 +539,7 @@ namespace SFP.Presentation
                 _navigation?.Tick(_dt, _subState, _engine, _ballasts);
                 float thrust = _engine?.CurrentThrust ?? 0f;
                 float curX = 0f, curZ = 0f;
+                OceanCurrents?.AdvanceTime(_dt);
                 OceanCurrents?.Sample(_subState.PositionX, _subState.PositionZ, _subState.Depth,
                     out curX, out curZ);
                 _gasFlow.Tick(_dt);
@@ -536,7 +553,9 @@ namespace SFP.Presentation
                 for (int i = 0; i < _vents.Count; i++)
                     _vents[i].Tick(_dt, _graph, _atmosphere, _powerGrid);
                 for (int i = 0; i < _sonars.Count; i++)
-                    _sonars[i].Tick(_dt, _powerGrid, _subState, Terrain, MineSystem, Creatures);
+                    _sonars[i].Tick(_dt, _powerGrid, _subState, Terrain, MineSystem, Creatures, OceanCurrents);
+                for (int i = 0; i < _adcps.Count; i++)
+                    _adcps[i].Tick(OceanCurrents, _subState.PositionX, _subState.PositionZ, _subState.Depth, _powerGrid);
                 for (int i = 0; i < _fabricators.Count; i++)
                     _fabricators[i].Tick(_dt, _powerGrid);
                 if (_fireSystem != null)
@@ -610,6 +629,11 @@ namespace SFP.Presentation
         public SonarState GetSonar(int index)
         {
             return index >= 0 && index < _sonars.Count ? _sonars[index] : null;
+        }
+
+        public ADCPState GetADCP(int index)
+        {
+            return index >= 0 && index < _adcps.Count ? _adcps[index] : null;
         }
 
         public FabricatorState GetFabricator(int index)

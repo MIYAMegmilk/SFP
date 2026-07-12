@@ -581,6 +581,17 @@ public static class FloodTestShipBuilder
             PlaceDeviceConsole(mStatusGo, new Vector3(-1.5f, -1.0f, 2.8f), new Vector3(1.7f, 1.4f, 0.15f), new Color(0.08f, 0.1f, 0.12f));
         }
 
+        // ADCP (ocean current sensor) in Bridge
+        {
+            var adcpGo = new GameObject("ADCP");
+            adcpGo.transform.SetParent(compDefs[11].transform);
+            var ad = adcpGo.AddComponent<ADCPDefinition>();
+            ad.Compartment = compDefs[11];
+            ad.PowerConsumption = 50f;
+            ad.MaxRange = 600f;
+            PlaceDeviceConsole(adcpGo, new Vector3(-1.8f, -2.3f, 0.8f), new Vector3(1.0f, 1.4f, 0.4f), new Color(0.1f, 0.7f, 0.9f));
+        }
+
         // Status monitor
         {
             var monitorGo = new GameObject("StatusMonitor");
