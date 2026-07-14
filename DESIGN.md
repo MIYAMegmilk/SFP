@@ -199,15 +199,15 @@ Timestamp                                AirlockPhase (byte)
 
 | # | Task | Agent | Deps | Status |
 |---|------|-------|------|--------|
-| 1 | `DeviceCommandKind` enum + `DeviceCommand` struct を `SFP.Simulation` に作成 | fast-worker | None | ⬜ |
-| 2 | `DeviceRpcRelay` 拡張: 汎用 `RequestCommand` / `DeviceCommandServerRpc` + `ExecuteCommand` switch | deep-reasoner | 1 | ⬜ |
-| 3 | `SimSnapshot` 拡張: 新フィールド追加 + `BuildSnapshot` + `Interpolate` + `ApplySnapshot` 更新 | deep-reasoner | None | ⬜ |
-| 4 | コアInteractionリファクタ: `SteeringInteraction`, `ReactorInteraction`, `BallastInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
-| 5 | ダメコンInteractionリファクタ: `PumpInteraction`, `AirlockInteraction`, `ExtinguisherInteraction`, `SuppressionInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
-| 6 | HVACリファクタ: `OxygenGeneratorInteraction`, `CO2ScrubberInteraction`, `VentInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
-| 7 | センサー・武装リファクタ: `SonarInteraction`, `TurretInteraction`, `CrewCommandInteraction`, `FabricatorInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
-| 8 | `DoorInteraction` を汎用コマンドに移行 + M12の `ToggleDoorServerRpc` 削除 | fast-worker | 2 | ⬜ |
-| 9 | コンパイル確認 + 統合テスト（ローカル） | manual | all | ⬜ |
+| 1 | `DeviceCommandKind` enum + `DeviceCommand` struct を `SFP.Simulation` に作成 | fast-worker | None | ✅ |
+| 2 | `DeviceRpcRelay` 拡張: 汎用 `RequestCommand` / `DeviceCommandServerRpc` + `ExecuteCommand` switch | deep-reasoner | 1 | ✅ |
+| 3 | `SimSnapshot` 拡張: 新フィールド追加 + `BuildSnapshot` + `Interpolate` + `ApplySnapshot` 更新 | deep-reasoner | None | ✅ |
+| 4 | コアInteractionリファクタ: `SteeringInteraction`, `ReactorInteraction`, `BallastInteraction` → コマンドRPC | fast-worker | 2 | ✅ |
+| 5 | ダメコンInteractionリファクタ: `PumpInteraction`, `AirlockInteraction`, `ExtinguisherInteraction`, `SuppressionInteraction` → コマンドRPC | fast-worker | 2 | ✅ |
+| 6 | HVACリファクタ: `OxygenGeneratorInteraction`, `CO2ScrubberInteraction`, `VentInteraction` → コマンドRPC | fast-worker | 2 | ✅ |
+| 7 | センサー・武装リファクタ: `SonarInteraction`, `TurretInteraction`, `CrewCommandInteraction`, `FabricatorInteraction` → コマンドRPC | fast-worker | 2 | ✅ |
+| 8 | `DoorInteraction` を汎用コマンドに移行 + M12の `ToggleDoorServerRpc` 削除 | fast-worker | 2 | ✅ |
+| 9 | コンパイル確認 + 統合テスト（ローカル） | manual | all | ✅ |
 
 ## Risks & Open Questions
 
