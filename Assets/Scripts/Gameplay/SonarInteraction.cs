@@ -55,7 +55,14 @@ namespace SFP.Gameplay
                 else if (kb.tabKey.wasPressedThisFrame)
                 {
                     var state = GetSonarState();
-                    if (state != null) state.IsPassive = !state.IsPassive;
+                    if (state != null)
+                    {
+                        var relay = DeviceRpcRelay.Instance;
+                        if (relay != null)
+                            relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.ToggleSonarPassive, IntVal = _activeSonar.SonarIndex });
+                        else
+                            state.IsPassive = !state.IsPassive;
+                    }
                 }
                 return;
             }
@@ -75,7 +82,14 @@ namespace SFP.Gameplay
             ConsoleFocus.Acquire(this);
 
             var s = GetSonarState();
-            if (s != null) s.IsActive = true;
+            if (s != null)
+            {
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.ToggleSonarActive, IntVal = sonar.SonarIndex });
+                else
+                    s.IsActive = true;
+            }
         }
 
         SonarState GetSonarState()

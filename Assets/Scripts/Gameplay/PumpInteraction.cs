@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
@@ -20,7 +22,25 @@ namespace SFP.Gameplay
             var pump = hit.collider.GetComponentInParent<Pump>();
             if (pump?.State == null) return;
 
-            pump.State.IsActive = !pump.State.IsActive;
+            var bridge = SimulationBridge.Instance;
+            if (bridge == null) return;
+
+            int pumpIndex = -1;
+            for (int i = 0; i < bridge.BilgePumps.Count; i++)
+            {
+                if (bridge.BilgePumps[i] == pump.State)
+                {
+                    pumpIndex = i;
+                    break;
+                }
+            }
+            if (pumpIndex < 0) return;
+
+            var relay = DeviceRpcRelay.Instance;
+            if (relay != null)
+                relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.TogglePump, IntVal = pumpIndex });
+            else
+                pump.State.IsActive = !pump.State.IsActive;
         }
     }
 }

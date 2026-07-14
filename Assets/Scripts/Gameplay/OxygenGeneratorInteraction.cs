@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using SFP.Simulation;
 using SFP.Presentation;
 
 namespace SFP.Gameplay
@@ -27,11 +28,24 @@ namespace SFP.Gameplay
             var state = bridge.GetOxygenGenerator(gen.GeneratorIndex);
             if (state == null) return;
 
-            state.IsEnabled = !state.IsEnabled;
+            bool newState = !state.IsEnabled;
+            var relay = DeviceRpcRelay.Instance;
+            if (relay != null)
+            {
+                relay.RequestCommand(new DeviceCommand
+                {
+                    Kind = DeviceCommandKind.ToggleO2Generator,
+                    IntVal = gen.GeneratorIndex
+                });
+            }
+            else
+            {
+                state.IsEnabled = newState;
+            }
 
             var mr = hit.collider.GetComponent<MeshRenderer>();
             if (mr != null)
-                mr.material.color = state.IsEnabled
+                mr.material.color = newState
                     ? new Color(0.1f, 0.7f, 0.3f)
                     : new Color(0.3f, 0.3f, 0.3f);
         }

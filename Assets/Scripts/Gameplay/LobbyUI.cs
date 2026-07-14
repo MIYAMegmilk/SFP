@@ -209,6 +209,8 @@ namespace SFP.Gameplay
 
         private void UpdateStatus()
         {
+            if (_statusText == null || NetworkBootstrap.Instance == null) return;
+
             if (NetworkBootstrap.Instance.IsConnected)
             {
                 if (NetworkBootstrap.Instance.IsHost)
@@ -228,6 +230,8 @@ namespace SFP.Gameplay
 
         private void UpdateControlVisibility()
         {
+            if (_hostButton == null || NetworkBootstrap.Instance == null) return;
+
             bool isConnected = NetworkBootstrap.Instance.IsConnected;
             _hostButton.gameObject.SetActive(!isConnected);
             _joinButton.gameObject.SetActive(!isConnected);

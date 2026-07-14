@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
@@ -40,7 +41,11 @@ namespace SFP.Gameplay
             if (intensity <= 0f) return;
 
             float suppress = ExtinguishRate * Time.deltaTime;
-            bridge.FireSystem.Extinguish(compId, suppress);
+            var relay = DeviceRpcRelay.Instance;
+            if (relay != null)
+                relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.Extinguish, IntVal = compId, FloatVal = suppress });
+            else
+                bridge.FireSystem.Extinguish(compId, suppress);
             _charge = Mathf.Max(0f, _charge - suppress * 2f);
         }
 

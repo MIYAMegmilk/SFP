@@ -48,7 +48,14 @@ namespace SFP.Gameplay
             {
                 _isSteering = false;
                 ConsoleFocus.Release(this);
-                if (bridge?.SubState != null) bridge.SubState.RudderAngle = 0f;
+                if (bridge?.SubState != null)
+                {
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetRudder, FloatVal = 0f });
+                    else
+                        bridge.SubState.RudderAngle = 0f;
+                }
                 return;
             }
 
@@ -65,29 +72,79 @@ namespace SFP.Gameplay
             if (engine != null)
             {
                 if (kb.wKey.isPressed)
-                    engine.ThrottleSetting = Mathf.Clamp(engine.ThrottleSetting + throttleSpeed, -1f, 1f);
+                {
+                    float newThrottle = Mathf.Clamp(engine.ThrottleSetting + throttleSpeed, -1f, 1f);
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetThrottle, FloatVal = newThrottle });
+                    else
+                        engine.ThrottleSetting = newThrottle;
+                }
                 if (kb.sKey.isPressed)
-                    engine.ThrottleSetting = Mathf.Clamp(engine.ThrottleSetting - throttleSpeed, -1f, 1f);
+                {
+                    float newThrottle = Mathf.Clamp(engine.ThrottleSetting - throttleSpeed, -1f, 1f);
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetThrottle, FloatVal = newThrottle });
+                    else
+                        engine.ThrottleSetting = newThrottle;
+                }
             }
 
             float rudder = 0f;
             if (kb.aKey.isPressed) rudder -= 1f;
             if (kb.dKey.isPressed) rudder += 1f;
-            sub.RudderAngle = rudder;
+
+            if (rudder != 0f || (kb.aKey.isPressed || kb.dKey.isPressed))
+            {
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetRudder, FloatVal = rudder });
+                else
+                    sub.RudderAngle = rudder;
+            }
 
             if (nav != null)
             {
                 if (kb.tabKey.wasPressedThisFrame)
-                    nav.AutoPilotEnabled = !nav.AutoPilotEnabled;
+                {
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.ToggleAutoPilot });
+                    else
+                        nav.AutoPilotEnabled = !nav.AutoPilotEnabled;
+                }
 
                 if (kb.upArrowKey.isPressed)
-                    nav.DesiredDepth = Mathf.Max(0f, nav.DesiredDepth - depthSpeed);
+                {
+                    float newDepth = Mathf.Max(0f, nav.DesiredDepth - depthSpeed);
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetDesiredDepth, FloatVal = newDepth });
+                    else
+                        nav.DesiredDepth = newDepth;
+                }
                 if (kb.downArrowKey.isPressed)
-                    nav.DesiredDepth += depthSpeed;
+                {
+                    float newDepth = nav.DesiredDepth + depthSpeed;
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetDesiredDepth, FloatVal = newDepth });
+                    else
+                        nav.DesiredDepth = newDepth;
+                }
                 if (kb.upArrowKey.isPressed || kb.downArrowKey.isPressed)
-                    nav.DepthHoldEnabled = true;
+                {
+                    if (!nav.DepthHoldEnabled)
+                    {
+                        var relay = DeviceRpcRelay.Instance;
+                        if (relay != null)
+                            relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.ToggleDepthHold });
+                        else
+                            nav.DepthHoldEnabled = true;
+                    }
+                }
 
-                // M: set autopilot heading/speed toward current mission objective
                 if (kb.mKey.wasPressedThisFrame)
                 {
                     var mm = FindFirstObjectByType<MissionManager>();
@@ -95,9 +152,20 @@ namespace SFP.Gameplay
                     if (missions?.Current != null)
                     {
                         float bearing = missions.BearingToTarget(sub);
-                        nav.DesiredHeading = bearing;
-                        nav.DesiredSpeed = 4f;
-                        nav.AutoPilotEnabled = true;
+                        var relay = DeviceRpcRelay.Instance;
+                        if (relay != null)
+                        {
+                            relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetDesiredHeading, FloatVal = bearing });
+                            relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetDesiredSpeed, FloatVal = 4f });
+                            if (!nav.AutoPilotEnabled)
+                                relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.ToggleAutoPilot });
+                        }
+                        else
+                        {
+                            nav.DesiredHeading = bearing;
+                            nav.DesiredSpeed = 4f;
+                            nav.AutoPilotEnabled = true;
+                        }
                     }
                 }
             }

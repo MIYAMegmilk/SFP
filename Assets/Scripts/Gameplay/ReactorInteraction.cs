@@ -53,16 +53,45 @@ namespace SFP.Gameplay
                 _activeReactor.ReactorIndex < 0) return;
 
             var reactor = bridge.PowerGrid.Reactors[_activeReactor.ReactorIndex];
+            int reactorIdx = _activeReactor.ReactorIndex;
 
             float adjustSpeed = 20f * Time.deltaTime;
             if (kb.upArrowKey.isPressed)
-                reactor.FissionRate = Mathf.Clamp(reactor.FissionRate + adjustSpeed, 0f, 100f);
+            {
+                float newRate = Mathf.Clamp(reactor.FissionRate + adjustSpeed, 0f, 100f);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetReactorFission, IntVal = reactorIdx, FloatVal = newRate });
+                else
+                    reactor.FissionRate = newRate;
+            }
             if (kb.downArrowKey.isPressed)
-                reactor.FissionRate = Mathf.Clamp(reactor.FissionRate - adjustSpeed, 0f, 100f);
+            {
+                float newRate = Mathf.Clamp(reactor.FissionRate - adjustSpeed, 0f, 100f);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetReactorFission, IntVal = reactorIdx, FloatVal = newRate });
+                else
+                    reactor.FissionRate = newRate;
+            }
             if (kb.rightArrowKey.isPressed)
-                reactor.TurbineOutput = Mathf.Clamp(reactor.TurbineOutput + adjustSpeed, 0f, 100f);
+            {
+                float newOutput = Mathf.Clamp(reactor.TurbineOutput + adjustSpeed, 0f, 100f);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetReactorTurbine, IntVal = reactorIdx, FloatVal = newOutput });
+                else
+                    reactor.TurbineOutput = newOutput;
+            }
             if (kb.leftArrowKey.isPressed)
-                reactor.TurbineOutput = Mathf.Clamp(reactor.TurbineOutput - adjustSpeed, 0f, 100f);
+            {
+                float newOutput = Mathf.Clamp(reactor.TurbineOutput - adjustSpeed, 0f, 100f);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetReactorTurbine, IntVal = reactorIdx, FloatVal = newOutput });
+                else
+                    reactor.TurbineOutput = newOutput;
+            }
         }
 
         void OnGUI()

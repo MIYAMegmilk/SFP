@@ -52,10 +52,21 @@ namespace SFP.Gameplay
             switch (state.Phase)
             {
                 case AirlockPhase.Dry:
-                    if (state.RequestFlood(bridge.Graph))
-                        ShowMessage("FLOODING", Color.yellow);
-                    else
-                        ShowMessage("CLOSE INNER DOOR FIRST", Color.red);
+                    {
+                        var relay = DeviceRpcRelay.Instance;
+                        if (relay != null)
+                        {
+                            relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.AirlockFlood, IntVal = airlockDef.AirlockIndex });
+                            ShowMessage("FLOODING", Color.yellow);
+                        }
+                        else
+                        {
+                            if (state.RequestFlood(bridge.Graph))
+                                ShowMessage("FLOODING", Color.yellow);
+                            else
+                                ShowMessage("CLOSE INNER DOOR FIRST", Color.red);
+                        }
+                    }
                     break;
 
                 case AirlockPhase.Flooded:
@@ -110,10 +121,21 @@ namespace SFP.Gameplay
                 switch (state.Phase)
                 {
                     case AirlockPhase.Dry:
-                        if (state.RequestFlood(bridge.Graph))
-                            ShowMessage("FLOODING FROM OUTSIDE", Color.yellow);
-                        else
-                            ShowMessage("INNER DOOR OPEN — CANNOT FLOOD", Color.red);
+                        {
+                            var relay = DeviceRpcRelay.Instance;
+                            if (relay != null)
+                            {
+                                relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.AirlockFlood, IntVal = 0 });
+                                ShowMessage("FLOODING FROM OUTSIDE", Color.yellow);
+                            }
+                            else
+                            {
+                                if (state.RequestFlood(bridge.Graph))
+                                    ShowMessage("FLOODING FROM OUTSIDE", Color.yellow);
+                                else
+                                    ShowMessage("INNER DOOR OPEN — CANNOT FLOOD", Color.red);
+                            }
+                        }
                         break;
 
                     case AirlockPhase.Flooded:
@@ -121,7 +143,11 @@ namespace SFP.Gameplay
                         if (outerHatch.IsOpen)
                         {
                             player.ExitEVA(new Vector3(21f, 18.6f, 3f));
-                            state.RequestDrain();
+                            var relay = DeviceRpcRelay.Instance;
+                            if (relay != null)
+                                relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.AirlockDrain, IntVal = 0 });
+                            else
+                                state.RequestDrain();
                             ShowMessage("RE-ENTERED — DRAINING", Color.yellow);
                         }
                         else

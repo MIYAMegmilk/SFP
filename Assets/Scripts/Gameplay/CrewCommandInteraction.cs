@@ -30,7 +30,11 @@ namespace SFP.Gameplay
 
             if (kb.xKey.wasPressedThisFrame && _selectedCrewId >= 0)
             {
-                bridge.CrewSystem.CancelOrder(_selectedCrewId);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.CancelCrewOrder, IntVal = _selectedCrewId });
+                else
+                    bridge.CrewSystem.CancelOrder(_selectedCrewId);
             }
         }
 
@@ -76,8 +80,12 @@ namespace SFP.Gameplay
             var breachVis = hit.collider.GetComponentInParent<BreachVisual>();
             if (breachVis != null && breachVis.Opening != null)
             {
-                bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.RepairBreach,
-                    breachVis.Opening.Id, shipLocal.x, shipLocal.y, shipLocal.z);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.IssueCrewOrder, IntVal = _selectedCrewId, IntVal2 = (int)CrewOrderKind.RepairBreach, FloatVal = (float)breachVis.Opening.Id });
+                else
+                    bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.RepairBreach,
+                        breachVis.Opening.Id, shipLocal.x, shipLocal.y, shipLocal.z);
                 return;
             }
 
@@ -88,8 +96,12 @@ namespace SFP.Gameplay
                 int pumpIdx = FindPumpIndex(bridge, pump);
                 if (pumpIdx >= 0)
                 {
-                    bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.OperatePump,
-                        pumpIdx, shipLocal.x, shipLocal.y, shipLocal.z);
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.IssueCrewOrder, IntVal = _selectedCrewId, IntVal2 = (int)CrewOrderKind.OperatePump, FloatVal = (float)pumpIdx });
+                    else
+                        bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.OperatePump,
+                            pumpIdx, shipLocal.x, shipLocal.y, shipLocal.z);
                     return;
                 }
             }
@@ -101,8 +113,12 @@ namespace SFP.Gameplay
                 int stationIdx = FindReactorStationIndex(bridge, reactorDef);
                 if (stationIdx >= 0)
                 {
-                    bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.OperateReactor,
-                        stationIdx, shipLocal.x, shipLocal.y, shipLocal.z);
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.IssueCrewOrder, IntVal = _selectedCrewId, IntVal2 = (int)CrewOrderKind.OperateReactor, FloatVal = (float)stationIdx });
+                    else
+                        bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.OperateReactor,
+                            stationIdx, shipLocal.x, shipLocal.y, shipLocal.z);
                     return;
                 }
             }
@@ -114,14 +130,24 @@ namespace SFP.Gameplay
                 var fire = bridge.FireSystem;
                 if (fire != null && fire.GetFireIntensity(compId) > 0.05f)
                 {
-                    bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.FightFire,
-                        compId, shipLocal.x, shipLocal.y, shipLocal.z);
+                    var relay = DeviceRpcRelay.Instance;
+                    if (relay != null)
+                        relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.IssueCrewOrder, IntVal = _selectedCrewId, IntVal2 = (int)CrewOrderKind.FightFire, FloatVal = (float)compId });
+                    else
+                        bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.FightFire,
+                            compId, shipLocal.x, shipLocal.y, shipLocal.z);
                     return;
                 }
             }
 
-            bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.MoveTo,
-                -1, shipLocal.x, shipLocal.y, shipLocal.z);
+            {
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.IssueCrewOrder, IntVal = _selectedCrewId, IntVal2 = (int)CrewOrderKind.MoveTo, FloatVal = -1f });
+                else
+                    bridge.CrewSystem.IssueOrder(_selectedCrewId, CrewOrderKind.MoveTo,
+                        -1, shipLocal.x, shipLocal.y, shipLocal.z);
+            }
         }
 
         int FindPumpIndex(SimulationBridge bridge, Pump pump)

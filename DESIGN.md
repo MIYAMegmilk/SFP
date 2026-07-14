@@ -1,144 +1,221 @@
-# DESIGN.md — M12: Multiplayer Foundation
+# DESIGN.md — M13: Device Command Relay + Full State Sync
 
 ## Goal
 
-NGO (Netcode for GameObjects) によるサーバー権威型マルチプレイヤー基盤を構築し、2〜4人の協力プレイで潜水艦を操作できるようにする。
+全プレイヤーインタラクション（操舵・原子炉・バラスト・ポンプ・HVAC・ソナー・砲塔・エアロック・消火・クルー指示）をサーバー権威型RPCで中継し、拡張スナップショットで全クライアントに同期する。M13完了後、マルチプレイで潜水艦の全操作が実際に機能する。
 
 ## Success Criteria
 
-- [ ] Host/Join によるLAN接続が成立する（IP直接入力）
-- [ ] 複数プレイヤーが同一船内で歩行・水泳し、互いの姿が見える
-- [ ] シミュレーションはホスト上のみで実行され、クライアントは状態スナップショットを受信・補間する
-- [ ] ドア開閉がRPC経由で全クライアントに同期される（デバイス同期のPoCとして）
-- [ ] クライアント切断時にホストがクラッシュしない
-- [ ] 既存のシングルプレイが壊れない（ホスト＝ソロプレイヤー）
+- [ ] クライアントが操舵コンソールを操作 → サーバーのSimulationに反映 → 全クライアントに同期
+- [ ] クライアントが原子炉・バラスト・ポンプ・HVAC・ソナー・砲塔・エアロック・消火を操作 → 同上
+- [ ] スナップショットに航法・バラスト・電力詳細・船殻HP・生物位置・デバイス有効状態が含まれる
+- [ ] クライアント側のStatusMonitor/ADCPがスナップショットデータを正しく表示
+- [ ] 既存シングルプレイが壊れない（DeviceRpcRelay未接続時はローカルフォールバック）
+- [ ] 帯域: スナップショット < 1KB/tick (10Hz LAN向け)
 
 ## Architecture
 
-### ネットワークモデル: Server-Authoritative (Host式)
+### DeviceCommand — 汎用コマンドRPC
 
-```
-┌─────────────────────────────────────────────────┐
-│ HOST (= Server + Client 0)                      │
-│                                                  │
-│  SimulationBridge ─── tick 30Hz ───▶ SimSnapshot │
-│       │                                  │       │
-│       ▼                                  ▼       │
-│  Presentation Layer              NetworkManager  │
-│  (ローカル描画)                    │           │ │
-│                            ┌──────┘           │  │
-│                            ▼                  ▼  │
-│                     ClientRpc(snapshot)  ServerRpc│
-│                            │            (input)  │
-└────────────────────────────│──────────────│───────┘
-                             ▼              │
-                    ┌────────────────────┐   │
-                    │ CLIENT N           │   │
-                    │                    │◀──┘
-                    │  SimSnapshotBuffer │
-                    │  (補間・適用)       │
-                    │  Presentation Layer│
-                    │  (ローカル描画)     │
-                    └────────────────────┘
-```
-
-### データフロー
-
-1. **クライアント → サーバー**: `PlayerInputCommand` (移動ベクトル、インタラクション) を `ServerRpc` で送信
-2. **サーバー**: `SimulationBridge.Tick()` で全システム更新（既存ロジック変更なし）
-3. **サーバー → クライアント**: `SimSnapshot` (潜水艦 + 区画水位 + デバイス状態) を `ClientRpc` でブロードキャスト
-4. **クライアント**: 受信スナップショットを補間してPresentationに適用
-
-### 新規クラス
-
-```
-SFP.Presentation
-├── NetworkBootstrap.cs        — NetworkManager設定、PlayerPrefab登録、接続管理
-├── SimSnapshotSync.cs         — NetworkBehaviour: スナップショット送受信・補間バッファ
-└── DeviceRpcRelay.cs          — NetworkBehaviour: デバイス操作のRPC中継 (PoC: ドア)
-
-SFP.Gameplay
-├── LobbyUI.cs                 — Host/Join画面 (uGUI, IP入力)
-├── PlayerInputCommand.cs      — INetworkSerializable 入力コマンド構造体
-└── PlayerNetworkController.cs — NetworkBehaviour: 位置同期、入力コマンド送信
-```
-
-### SimSnapshot構造
+M12のドア専用RPCを汎用化。全デバイス操作を1つのServerRpcで処理する。
 
 ```csharp
-struct SimSnapshot : INetworkSerializable
+// SFP.Simulation に配置（純粋C#、enum + struct）
+public enum DeviceCommandKind : byte
 {
-    // 潜水艦 (5 floats)
-    float Depth, Heading, Speed, PositionX, PositionZ;
+    // 操舵 (SteeringInteraction)
+    SetThrottle,         // FloatVal = throttle [-1..1]
+    SetRudder,           // FloatVal = angle
+    SetDesiredDepth,     // FloatVal = depth
+    SetDesiredHeading,   // FloatVal = heading
+    SetDesiredSpeed,     // FloatVal = speed
+    ToggleAutoPilot,     // no value
+    ToggleDepthHold,     // no value
 
-    // 区画 (12室)
-    float[] WaterVolumes;
-    float[] OxygenLevels;
-    float[] Pressures;
+    // 原子炉 (ReactorInteraction)
+    SetReactorFission,   // IntVal = reactor index, FloatVal = rate
+    SetReactorTurbine,   // IntVal = reactor index, FloatVal = output
 
-    // 開口部 (~20個, bit-packed)
-    uint OpeningBitfield; // bit0=IsOpen, per opening
+    // バラスト (BallastInteraction)
+    SetBallastTarget,    // IntVal = tank index, FloatVal = fill level
 
-    // 電力
-    float PowerVoltage;
+    // ポンプ (PumpInteraction)
+    TogglePump,          // IntVal = pump index
+
+    // エアロック (AirlockInteraction)
+    AirlockFlood,        // IntVal = airlock index
+    AirlockDrain,        // IntVal = airlock index
+
+    // HVAC
+    ToggleO2Generator,   // IntVal = device index
+    ToggleCO2Scrubber,   // IntVal = device index
+    ToggleVent,          // IntVal = device index
+
+    // 消火 (ExtinguisherInteraction)
+    Extinguish,          // IntVal = compartment id, FloatVal = amount
+
+    // 自動消火 (SuppressionInteraction)
+    ToggleSuppression,   // IntVal = device index
+
+    // ソナー (SonarInteraction)
+    ToggleSonarActive,   // no value
+    ToggleSonarPassive,  // no value
+
+    // 砲塔 (TurretInteraction)
+    SetTurretRotation,   // IntVal = turret index, FloatVal = angle
+    SetTurretElevation,  // IntVal = turret index, FloatVal = angle
+    FireTurret,          // IntVal = turret index
+
+    // クルー (CrewCommandInteraction)
+    IssueCrewOrder,      // IntVal = memberId, IntVal2 = orderId, FloatVal = targetId
+    CancelCrewOrder,     // IntVal = memberId
+
+    // ドア/ハッチ (DoorInteraction — M12の専用RPCを置換)
+    ToggleDoor,          // IntVal = opening index
+
+    // ファブリケーター (FabricatorInteraction)
+    StartCraft,          // IntVal = fabricator index, IntVal2 = recipe index
+
+    // 潜水服 (DivingSuitInteraction)
+    TakeSuit,            // IntVal = locker index
+    ReturnSuit,          // IntVal = locker index
+}
+
+public struct DeviceCommand : INetworkSerializable
+{
+    public DeviceCommandKind Kind;
+    public int IntVal;
+    public int IntVal2;
+    public float FloatVal;
+    // 合計: 1 + 4 + 4 + 4 = 13 bytes/command
 }
 ```
 
-### プレイヤー同期
+### DeviceRpcRelay 拡張
 
-| 要素 | 方式 |
+```csharp
+// SFP.Presentation
+public class DeviceRpcRelay : NetworkBehaviour
+{
+    // クライアント → サーバー: 全デバイス操作の統一エントリポイント
+    public void RequestCommand(DeviceCommand cmd)
+    {
+        if (NetworkBootstrap.Instance?.IsServer == true)
+            ExecuteCommand(cmd); // ホスト: 直接実行
+        else
+            DeviceCommandServerRpc(cmd);
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void DeviceCommandServerRpc(DeviceCommand cmd, ServerRpcParams p = default)
+    {
+        ExecuteCommand(cmd);
+    }
+
+    void ExecuteCommand(DeviceCommand cmd)
+    {
+        var bridge = SimulationBridge.Instance;
+        if (bridge == null) return;
+
+        switch (cmd.Kind)
+        {
+            case SetThrottle: bridge.Engine.ThrottleSetting = Mathf.Clamp(cmd.FloatVal, -1f, 1f); break;
+            case SetRudder:   bridge.SubState.RudderAngle = cmd.FloatVal; break;
+            // ... 各コマンドのサーバー側処理
+        }
+    }
+
+    // M12のToggleDoorServerRpcは削除 → ToggleDoor commandに統合
+}
+```
+
+### Interaction リファクタパターン
+
+全 *Interaction クラスに同じパターンを適用:
+
+```csharp
+// Before (直接変更 — クライアントでは無効):
+bridge.Engine.ThrottleSetting = newThrottle;
+
+// After (RPC経由 — ネットワーク透過):
+var relay = DeviceRpcRelay.Instance;
+if (relay != null)
+    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetThrottle, FloatVal = newThrottle });
+else
+    bridge.Engine.ThrottleSetting = newThrottle; // フォールバック (シングルプレイ)
+```
+
+### SimSnapshot 拡張
+
+```
+現在のフィールド (M12):                  追加フィールド (M13):
+─────────────────────────                ─────────────────────────
+Depth, Heading, Speed,                   NavDesiredDepth/Heading/Speed (3 float)
+PositionX, PositionZ                     NavFlags byte (AutoPilot, DepthHold)
+Throttle, Rudder
+PowerVoltage                             ReactorFission[] (per reactor)
+                                         ReactorTurbine[] (per reactor)
+WaterVolumes[14]                         ReactorTemp[] (per reactor)
+OxygenLevels[14]                         BatteryCharge[] (per battery)
+Pressures[14]
+FireIntensities[14]                      BallastFillLevels[] (per tank)
+
+OpeningBitfield (32 bits)                DeviceEnabledBits (uint, 32 bits)
+                                           bit 0-13: BilgePumps
+                                           bit 14-16: Vents
+                                           bit 17-18: O2Generators
+                                           bit 19-20: CO2Scrubbers
+                                           bit 21-22: SuppressionSystems
+
+Timestamp                                AirlockPhase (byte)
+                                         SonarFlags (byte: Active|Passive)
+
+                                         TurretRotation, TurretElevation (2 float)
+                                         TurretAmmo (int)
+
+                                         HullIntegrities[] (per section, 84)
+
+                                         CreatureX/Z/Depth/Health[] (6 each)
+                                         CreatureAliveBits (byte)
+```
+
+**帯域見積もり**: 現行~280B + 追加~530B = ~810B/tick × 10Hz = ~8 KB/s（LAN十分）
+
+### ローカルフォールバック方針
+
+`DeviceRpcRelay.Instance == null` のとき（シングルプレイ、NetworkManager未起動）、各Interactionは従来どおり直接変更。これによりシングルプレイ互換を保証。
+
+### 対象外（M14以降に延期）
+
+| 項目 | 理由 |
 |------|------|
-| 自キャラ移動 | Owner権威: ローカル `CharacterController.Move()` → `NetworkTransform` で同期 |
-| 他キャラ位置 | NetworkTransform 補間 |
-| カメラ | 完全ローカル (同期不要) |
-| デバイス操作 | ServerRpc → サーバー検証 → SimSnapshot反映 |
-
-### SimulationBridge変更方針
-
-```csharp
-// 追加フィールド
-public bool IsServer { get; set; } = true; // デフォルトtrue = シングルプレイ互換
-
-void Update()
-{
-    if (!IsServer) return;  // クライアント: tickスキップ
-    // ... 既存のtickロジック (変更なし)
-}
-
-// 新規: クライアント用スナップショット適用
-public void ApplySnapshot(SimSnapshot snapshot)
-{
-    _subState.Depth = snapshot.Depth;
-    _subState.Heading = snapshot.Heading;
-    // ... 区画水位、開口部状態
-}
-```
+| BreachTool / RepairTool | ランタイムのOpening生成・削除 → ネットワークオブジェクト生成が必要 |
+| PumpPlacer / BuildTool | ランタイム構造物生成 → NetworkObject.Spawn |
+| EVAWeaponController | クリーチャーダメージ → クリーチャー同期の上に構築 |
+| デルタ圧縮 | 帯域最適化。LAN環境ではフルステート送信で十分 |
+| SWEグリッド同期 | データ量大。クライアントは独立SWEで見た目のみ |
 
 ## Task Breakdown
 
 | # | Task | Agent | Deps | Status |
 |---|------|-------|------|--------|
-| 1 | NGOパッケージ追加 (`netcode.gameobjects` + `transport`) + asmdef参照更新 | fast-worker | None | ✅ |
-| 2 | `PlayerInputCommand.cs` — INetworkSerializable入力構造体 | fast-worker | 1 | ✅ |
-| 3 | `NetworkBootstrap.cs` — NetworkManager、Transport、PlayerPrefab登録 | deep-reasoner | 1 | ✅ |
-| 4 | `PlayerNetworkController.cs` — NetworkBehaviour、NetworkTransform、入力送信 | deep-reasoner | 2,3 | ✅ |
-| 5 | `SimSnapshotSync.cs` — スナップショット生成・送信・受信・補間 | deep-reasoner | 3 | ✅ |
-| 6 | `DeviceRpcRelay.cs` — ドア開閉RPCの実装 (PoC) | fast-worker | 3 | ✅ |
-| 7 | `LobbyUI.cs` — Host/Join UI (IP入力、状態表示) | fast-worker | 3 | ✅ |
-| 8 | `SimulationBridge` 修正 — IsServerガード + ApplySnapshot | deep-reasoner | 5 | ✅ |
-| 9 | `PlayerController` 修正 — ローカル入力→コマンド変換、ネットワーク連携 | deep-reasoner | 4 | ✅ |
-| 10 | `DoorInteraction` 修正 — 直接変更→DeviceRpcRelay経由に切り替え | fast-worker | 6 | ✅ |
-| 11 | FloodTestShipBuilder修正 — NetworkManagerプレハブ配置 | fast-worker | 3 | ✅ |
-| 12 | 統合テスト — ParrelSync等で2窓確認 | manual (ローカル) | all | ✅ |
+| 1 | `DeviceCommandKind` enum + `DeviceCommand` struct を `SFP.Simulation` に作成 | fast-worker | None | ⬜ |
+| 2 | `DeviceRpcRelay` 拡張: 汎用 `RequestCommand` / `DeviceCommandServerRpc` + `ExecuteCommand` switch | deep-reasoner | 1 | ⬜ |
+| 3 | `SimSnapshot` 拡張: 新フィールド追加 + `BuildSnapshot` + `Interpolate` + `ApplySnapshot` 更新 | deep-reasoner | None | ⬜ |
+| 4 | コアInteractionリファクタ: `SteeringInteraction`, `ReactorInteraction`, `BallastInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
+| 5 | ダメコンInteractionリファクタ: `PumpInteraction`, `AirlockInteraction`, `ExtinguisherInteraction`, `SuppressionInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
+| 6 | HVACリファクタ: `OxygenGeneratorInteraction`, `CO2ScrubberInteraction`, `VentInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
+| 7 | センサー・武装リファクタ: `SonarInteraction`, `TurretInteraction`, `CrewCommandInteraction`, `FabricatorInteraction` → コマンドRPC | fast-worker | 2 | ⬜ |
+| 8 | `DoorInteraction` を汎用コマンドに移行 + M12の `ToggleDoorServerRpc` 削除 | fast-worker | 2 | ⬜ |
+| 9 | コンパイル確認 + 統合テスト（ローカル） | manual | all | ⬜ |
 
 ## Risks & Open Questions
 
-1. **NGO vs Mirror**: NGOはUnity公式だがカスタムシミュレーション同期に制約がある可能性。M12で問題が出ればM13でMirror移行を検討
-2. **スナップショット帯域**: 30Hz全状態送信は過剰。M12では10Hz + 線形補間で開始。デルタ圧縮はM13
-3. **ShallowWater同期**: SWEグリッドはデータ量大。M12では区画水位のみ同期、SWEはクライアントで独立シミュレーション（見た目のみ）
-4. **BuildGraph on Client**: クライアントでもシーン構造は必要（描画用）。BuildGraphは両サイドで実行するが、クライアントではSimulation初期化をスキップ
-5. **ParrelSync**: Editor2窓テストに必要。パッケージ追加が必要
-6. **asmdef更新**: `SFP.Presentation.asmdef` と `SFP.Gameplay.asmdef` にNGO参照を追加する必要あり
+1. **INetworkSerializableの配列長変動**: コンパートメント数やクリーチャー数が接続中に変わることは想定しない（シーン構築時に固定）
+2. **コマンドのバリデーション**: サーバー側ExecuteCommandで境界チェック（配列範囲、値クランプ）を必ず行う
+3. **DivingSuitInteraction**: プレイヤーローカル状態。NetworkTransformで位置は同期されるが、装備ビジュアルの同期は別途必要（M14）
+4. **StatusMonitor/ADCP**: 読み取り専用 — スナップショットデータを表示するだけで変更不要
+5. **uint OpeningBitfield 32bit制限**: 現在20個以下なので問題なし。増加時はulongに拡張
 
 ## Review Log
 

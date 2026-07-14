@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
@@ -31,7 +32,11 @@ namespace SFP.Gameplay
             var relay = DeviceRpcRelay.Instance;
             if (relay != null)
             {
-                relay.RequestToggleDoor(openingDef.SimIndex);
+                relay.RequestCommand(new DeviceCommand
+                {
+                    Kind = DeviceCommandKind.ToggleDoor,
+                    IntVal = openingDef.SimIndex
+                });
             }
             else
             {

@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
@@ -27,7 +28,11 @@ namespace SFP.Gameplay
             var state = bridge.GetSuppression(suppression.SuppressionIndex);
             if (state == null) return;
 
-            state.IsActive = !state.IsActive;
+            var relay = DeviceRpcRelay.Instance;
+            if (relay != null)
+                relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.ToggleSuppression, IntVal = suppression.SuppressionIndex });
+            else
+                state.IsActive = !state.IsActive;
 
             var mr = hit.collider.GetComponent<MeshRenderer>();
             if (mr != null)

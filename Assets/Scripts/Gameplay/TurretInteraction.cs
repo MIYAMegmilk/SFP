@@ -71,17 +71,29 @@ namespace SFP.Gameplay
             if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) turn += 1f;
             _aimBearing += turn * TurnRateDegPerSec * Time.deltaTime;
             _aimBearing = ((_aimBearing % 360f) + 360f) % 360f;
-            state.Rotation = _aimBearing;
+
+            var relay = DeviceRpcRelay.Instance;
+            if (relay != null)
+                relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetTurretRotation, IntVal = _activeTurret.TurretIndex, FloatVal = _aimBearing });
+            else
+                state.Rotation = _aimBearing;
 
             if (kb.spaceKey.wasPressedThisFrame && bridge.Creatures != null)
             {
-                bool fired = state.TryFire(_aimBearing, bridge.SubState, bridge.Creatures,
-                    out int hitCreatureId, out float hitDistance);
-                if (fired)
+                if (relay != null)
                 {
-                    _flashTimer = 0.6f;
-                    _lastShotHit = hitCreatureId >= 0;
-                    _localCooldownTimer = state.FireCooldown;
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.FireTurret, IntVal = _activeTurret.TurretIndex });
+                }
+                else
+                {
+                    bool fired = state.TryFire(_aimBearing, bridge.SubState, bridge.Creatures,
+                        out int hitCreatureId, out float hitDistance);
+                    if (fired)
+                    {
+                        _flashTimer = 0.6f;
+                        _lastShotHit = hitCreatureId >= 0;
+                        _localCooldownTimer = state.FireCooldown;
+                    }
                 }
             }
         }

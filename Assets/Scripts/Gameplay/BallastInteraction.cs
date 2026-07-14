@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SFP.Presentation;
+using SFP.Simulation;
 
 namespace SFP.Gameplay
 {
@@ -59,18 +60,32 @@ namespace SFP.Gameplay
             bool adjusted = false;
             if (kb.wKey.isPressed)
             {
-                ballast.TargetFillLevel = Mathf.Clamp01(ballast.TargetFillLevel + adjustSpeed);
+                float newLevel = Mathf.Clamp01(ballast.TargetFillLevel + adjustSpeed);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetBallastTarget, IntVal = _activeIndex, FloatVal = newLevel });
+                else
+                    ballast.TargetFillLevel = newLevel;
                 adjusted = true;
             }
             if (kb.sKey.isPressed)
             {
-                ballast.TargetFillLevel = Mathf.Clamp01(ballast.TargetFillLevel - adjustSpeed);
+                float newLevel = Mathf.Clamp01(ballast.TargetFillLevel - adjustSpeed);
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.SetBallastTarget, IntVal = _activeIndex, FloatVal = newLevel });
+                else
+                    ballast.TargetFillLevel = newLevel;
                 adjusted = true;
             }
-            // Manual pump input takes over depth control; setting a new depth target at the
-            // helm re-arms the automatic depth hold.
-            if (adjusted && bridge.Navigation != null)
-                bridge.Navigation.DepthHoldEnabled = false;
+            if (adjusted && bridge.Navigation != null && bridge.Navigation.DepthHoldEnabled)
+            {
+                var relay = DeviceRpcRelay.Instance;
+                if (relay != null)
+                    relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.ToggleDepthHold });
+                else
+                    bridge.Navigation.DepthHoldEnabled = false;
+            }
         }
 
         void OnGUI()

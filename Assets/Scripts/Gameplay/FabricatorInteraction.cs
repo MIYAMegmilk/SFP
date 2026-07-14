@@ -132,7 +132,13 @@ namespace SFP.Gameplay
                 else if (state.CanStartCraft(selected))
                 {
                     if (GUI.Button(new Rect(lx, y, 100, 25), "CRAFT"))
-                        state.StartCraft(selected);
+                    {
+                        var relay = DeviceRpcRelay.Instance;
+                        if (relay != null)
+                            relay.RequestCommand(new DeviceCommand { Kind = DeviceCommandKind.StartCraft, IntVal = _activeFab.FabricatorIndex, IntVal2 = _selectedRecipe });
+                        else
+                            state.StartCraft(selected);
+                    }
                 }
             }
 
