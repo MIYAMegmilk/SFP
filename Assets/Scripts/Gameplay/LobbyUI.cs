@@ -5,7 +5,7 @@ using SFP.Presentation;
 
 namespace SFP.Gameplay
 {
-    sealed class LobbyUI : MonoBehaviour
+    public sealed class LobbyUI : MonoBehaviour
     {
         private GameObject _lobbyPanel;
         private Text _statusText;

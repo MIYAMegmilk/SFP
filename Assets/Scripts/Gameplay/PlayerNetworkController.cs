@@ -15,7 +15,7 @@ namespace SFP.Gameplay
         PlayerController _playerController;
         CharacterController _cc;
 
-        public bool IsLocalPlayer => IsOwner;
+        public new bool IsLocalPlayer => IsOwner;
 
         void Awake()
         {
