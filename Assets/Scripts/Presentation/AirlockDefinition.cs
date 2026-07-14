@@ -8,6 +8,7 @@ namespace SFP.Presentation
         public OpeningDefinition InnerDoor;
         public OpeningDefinition OuterHatch;
         public OpeningDefinition FloodValve;
+        public OpeningDefinition FloorHatch;
         public float PowerConsumption = 200f;
         [HideInInspector] public int AirlockIndex = -1;
 

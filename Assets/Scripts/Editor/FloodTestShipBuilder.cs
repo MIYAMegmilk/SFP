@@ -2,6 +2,8 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
 using SFP.Presentation;
 using SFP.Gameplay;
 
@@ -45,7 +47,7 @@ public static class FloodTestShipBuilder
             new() { Name = "Ballast_Bow",   FloorY = 0,    Height = H, LengthX = L, WidthZ = W, Center = new(3f,   3f,  3f), Deck = 0 },
             new() { Name = "Engine",        FloorY = 0,    Height = H, LengthX = L, WidthZ = W, Center = new(9f,   3f,  3f), Deck = 0 },
             new() { Name = "Ballast_Stern", FloorY = 0,    Height = H, LengthX = L, WidthZ = W, Center = new(15f,  3f,  3f), Deck = 0 },
-            new() { Name = "Airlock",       FloorY = 0,    Height = H, LengthX = L, WidthZ = W, Center = new(21f,  3f,  3f), Deck = 0 },
+            new() { Name = "Workshop",      FloorY = 0,    Height = H, LengthX = L, WidthZ = W, Center = new(21f,  3f,  3f), Deck = 0 },
             // Middle deck (floorY=6)
             new() { Name = "Corridor1",     FloorY = 6f,   Height = H, LengthX = L, WidthZ = W, Center = new(3f,   9f,  3f), Deck = 1 },
             new() { Name = "Living1",       FloorY = 6f,   Height = H, LengthX = L, WidthZ = W, Center = new(9f,   9f,  3f), Deck = 1 },
@@ -56,6 +58,9 @@ public static class FloodTestShipBuilder
             new() { Name = "Corridor4",     FloorY = 12f,  Height = H, LengthX = L, WidthZ = W, Center = new(9f,   15f, 3f), Deck = 2 },
             new() { Name = "Living3",       FloorY = 12f,  Height = H, LengthX = L, WidthZ = W, Center = new(15f,  15f, 3f), Deck = 2 },
             new() { Name = "Bridge",        FloorY = 12f,  Height = H, LengthX = L, WidthZ = W, Center = new(21f,  15f, 3f), Deck = 2 },
+            // Sail deck (floorY=18) — conning tower with airlock
+            new() { Name = "EVA_Prep",      FloorY = 18f,  Height = H, LengthX = L, WidthZ = W, Center = new(15f,  21f, 3f), Deck = 3 },
+            new() { Name = "Airlock",       FloorY = 18f,  Height = H, LengthX = L, WidthZ = W, Center = new(21f,  21f, 3f), Deck = 3 },
         };
 
         var opens = new OpenSpec[]
@@ -80,9 +85,14 @@ public static class FloodTestShipBuilder
             new() { Name = "Hatch_M0_U0", A = 4, B = 8,  Pos = new(3f,  12f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
             new() { Name = "Hatch_M1_U1", A = 5, B = 9,  Pos = new(9f,  12f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
             new() { Name = "Hatch_M2_U2", A = 6, B = 10, Pos = new(15f, 12f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
-            // Airlock sea openings (A=-1 → Sea)
-            new() { Name = "OuterHatch_Airlock", A = 3, B = -1, Pos = new(21f, 0.5f, 4.5f), Area = 0.8f, Height = 1f, Kind = SFP.Simulation.OpeningKind.Hatch },
-            new() { Name = "FloodValve_Airlock", A = 3, B = -1, Pos = new(21f, 0.2f, 1.0f), Area = 0.2f, Height = 0.4f, Kind = SFP.Simulation.OpeningKind.Hatch },
+            // Hatches upper->sail (Y=18)
+            new() { Name = "Hatch_U2_S0", A = 10, B = 12, Pos = new(15f, 18f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
+            new() { Name = "Hatch_U3_S1", A = 11, B = 13, Pos = new(21f, 18f, 3f), Area = 0.8f, Height = 0.5f, Kind = SFP.Simulation.OpeningKind.Hatch },
+            // Sail deck door
+            new() { Name = "Door_S0_S1", A = 12, B = 13, Pos = new(18f, 19.5f, 3f), Area = 6f, Height = 3f, Kind = SFP.Simulation.OpeningKind.Door },
+            // Airlock sea openings (now on sail deck, compDef 13)
+            new() { Name = "OuterHatch_Airlock", A = 13, B = -1, Pos = new(23f, 18.5f, 4.5f), Area = 0.8f, Height = 1f, Kind = SFP.Simulation.OpeningKind.Hatch },
+            new() { Name = "FloodValve_Airlock", A = 13, B = -1, Pos = new(23f, 18.2f, 1.0f), Area = 0.2f, Height = 0.4f, Kind = SFP.Simulation.OpeningKind.Hatch },
         };
 
         // Load kit prefabs
@@ -144,17 +154,19 @@ public static class FloodTestShipBuilder
         var structParent = new GameObject("Structures");
         structParent.transform.SetParent(hullParent.transform);
 
+        // Decks 0-2: full width (4 columns each)
         for (int deck = 0; deck < 3; deck++)
         {
             float floorY = deck * H;
 
-            // Floors (4 per deck + roof on top deck)
+            // Floors (4 per deck)
             for (int col = 0; col < 4; col++)
                 PlaceFloor(structParent.transform, floorTile, col * L, floorY, 0f);
 
+            // Ceiling for cols 0-1 on deck 2 (no deck 3 above them)
             if (deck == 2)
             {
-                for (int col = 0; col < 4; col++)
+                for (int col = 0; col < 2; col++)
                     PlaceFloor(structParent.transform, floorTile, col * L, floorY + H, 0f);
             }
 
@@ -170,6 +182,26 @@ public static class FloodTestShipBuilder
 
             // WallZ faces (south Z=0 and north Z=6, 4 segments each)
             for (int col = 0; col < 4; col++)
+            {
+                PlaceWallZ(structParent.transform, wallPlain, col * L, floorY, 0f);
+                PlaceWallZ(structParent.transform, wallPlain, col * L, floorY, W);
+            }
+        }
+
+        // Deck 3 (sail): partial width — cols 2-3 only (x=12..24)
+        {
+            float floorY = 3 * H;
+            // Floor tiles (also serve as deck 2's ceiling for cols 2-3)
+            for (int col = 2; col < 4; col++)
+                PlaceFloor(structParent.transform, floorTile, col * L, floorY, 0f);
+            // Ceiling (roof of sail deck)
+            for (int col = 2; col < 4; col++)
+                PlaceFloor(structParent.transform, floorTile, col * L, floorY + H, 0f);
+            // WallX: boundaries at x=12, 18, 24
+            for (int bx = 2; bx <= 4; bx++)
+                PlaceWallX(structParent.transform, wallPlain, bx * L, floorY, 0f);
+            // WallZ: south and north for cols 2-3
+            for (int col = 2; col < 4; col++)
             {
                 PlaceWallZ(structParent.transform, wallPlain, col * L, floorY, 0f);
                 PlaceWallZ(structParent.transform, wallPlain, col * L, floorY, W);
@@ -259,12 +291,12 @@ public static class FloodTestShipBuilder
         var simBridge = bridgeGo.AddComponent<SimulationBridge>();
         simBridge.DebugUnlimitedPower = true;
         simBridge.InitialDepth = 200f;
-        simBridge.HullVolume = 2800f;
+        simBridge.HullVolume = 3200f;
         // Trimmed so the boat is neutral with the MBTs at 50% (2 tanks × 240 m³ × 0.5 = 240 m³):
-        // ρ·V_hull = DryMass + ρ·240 → DryMass = ρ·(2800 − 240). The 240 m³ full-blow reserve
+        // ρ·V_hull = DryMass + ρ·240 → DryMass = ρ·(3200 − 240). The 240 m³ full-blow reserve
         // exceeds one 216 m³ compartment (one-compartment standard) — a single fully flooded
         // room is survivable by blowing tanks.
-        simBridge.SubmarineDryMass = 1025f * (2800f - 240f);
+        simBridge.SubmarineDryMass = 1025f * (3200f - 240f);
         simBridge.ShipRootRef = shipRootGo.transform;
         bridgeGo.AddComponent<SFP.Presentation.DebugOverlay>();
         bridgeGo.AddComponent<DamageEventPresenter>();
@@ -275,6 +307,21 @@ public static class FloodTestShipBuilder
         bsm.GridOrigin = new Vector3(0f, 0f, 0f);
         bsm.WallPrefab = wallPlain;
         bsm.FloorPrefab = floorTile;
+
+        // Network infrastructure
+        var networkGo = new GameObject("Network");
+        networkGo.AddComponent<NetworkManager>();
+        networkGo.AddComponent<UnityTransport>();
+        networkGo.AddComponent<NetworkBootstrap>();
+
+        var syncGo = new GameObject("NetworkSync");
+        syncGo.AddComponent<NetworkObject>();
+        syncGo.AddComponent<SimSnapshotSync>();
+        syncGo.AddComponent<DeviceRpcRelay>();
+
+        // Lobby UI
+        var lobbyGo = new GameObject("LobbyUI");
+        lobbyGo.AddComponent<LobbyUI>();
 
         BuildOceanEnvironment();
 
@@ -622,33 +669,35 @@ public static class FloodTestShipBuilder
             PlaceDeviceConsole(medGo, new Vector3(2.3f, -2.3f, 2.3f), new Vector3(1.4f, 1.4f, 0.9f), new Color(0.9f, 0.9f, 0.95f));
         }
 
-        // Diving suit locker
+        // Diving suit locker (in EVA_Prep room, compDefs[12])
         {
             var lockerGo = new GameObject("DivingSuitLocker");
-            lockerGo.transform.SetParent(compDefs[3].transform);
+            lockerGo.transform.SetParent(compDefs[12].transform);
             var dsl = lockerGo.AddComponent<DivingSuitLockerDefinition>();
-            dsl.Compartment = compDefs[3];
+            dsl.Compartment = compDefs[12];
             dsl.SuitCount = 2;
             PlaceDeviceConsole(lockerGo, new Vector3(2.5f, -2.0f, 0f), new Vector3(1.0f, 2.0f, 0.6f), new Color(0.9f, 0.5f, 0.1f));
         }
 
-        // Airlock console + definition
+        // Airlock console + definition (in Airlock room, compDefs[13])
         {
-            OpeningDefinition outerHatchDef = null, floodValveDef = null, innerDoorDef = null;
+            OpeningDefinition outerHatchDef = null, floodValveDef = null, innerDoorDef = null, floorHatchDef = null;
             for (int i = 0; i < openingDefs.Length; i++)
             {
                 if (opens[i].Name == "OuterHatch_Airlock") outerHatchDef = openingDefs[i];
                 else if (opens[i].Name == "FloodValve_Airlock") { floodValveDef = openingDefs[i]; floodValveDef.IsGasSealed = true; }
-                else if (opens[i].Name == "Door_L2_L3") innerDoorDef = openingDefs[i];
+                else if (opens[i].Name == "Door_S0_S1") innerDoorDef = openingDefs[i];
+                else if (opens[i].Name == "Hatch_U3_S1") floorHatchDef = openingDefs[i];
             }
 
             var airlockGo = new GameObject("AirlockConsole");
-            airlockGo.transform.SetParent(compDefs[3].transform);
+            airlockGo.transform.SetParent(compDefs[13].transform);
             var ad = airlockGo.AddComponent<AirlockDefinition>();
-            ad.Compartment = compDefs[3];
+            ad.Compartment = compDefs[13];
             ad.InnerDoor = innerDoorDef;
             ad.OuterHatch = outerHatchDef;
             ad.FloodValve = floodValveDef;
+            ad.FloorHatch = floorHatchDef;
             ad.PowerConsumption = 200f;
             PlaceDeviceConsole(airlockGo, new Vector3(-2.5f, -1.5f, 2.3f), new Vector3(0.6f, 1.2f, 0.6f), new Color(0.2f, 0.8f, 0.8f));
         }
@@ -701,6 +750,7 @@ public static class FloodTestShipBuilder
         playerGo.AddComponent<VentInteraction>();
         playerGo.AddComponent<CrewCommandInteraction>();
         playerGo.AddComponent<AirlockInteraction>();
+        playerGo.AddComponent<ADCPInteraction>();
         playerGo.AddComponent<EVAWeaponController>();
 
         // Crew visuals manager (under ShipRoot)
@@ -729,10 +779,13 @@ public static class FloodTestShipBuilder
         spawn3.transform.localPosition = new Vector3(21f, 12f, 3f);
         spawn3.AddComponent<CrewSpawnDefinition>().Job = SFP.Simulation.CrewJobKind.DamageControl;
 
-        // Ladders (hatch indices 9..14 in opens array)
-        for (int i = 9; i < opens.Length; i++)
+        // Ladders for vertical hatches (inter-deck openings with two compartments)
+        for (int i = 0; i < opens.Length; i++)
         {
             var spec = opens[i];
+            if (spec.Kind != SFP.Simulation.OpeningKind.Hatch) continue;
+            if (spec.B < 0) continue; // sea opening, no ladder
+
             var ladderGo = new GameObject($"Ladder_{spec.Name}");
             ladderGo.transform.SetParent(shipRootGo.transform);
             ladderGo.transform.position = spec.Pos + new Vector3(0.8f, 0f, 0f);
@@ -756,7 +809,7 @@ public static class FloodTestShipBuilder
             AssetDatabase.CreateFolder("Assets", "Scenes");
 
         EditorSceneManager.SaveScene(scene, "Assets/Scenes/FloodTestShip.unity");
-        Debug.Log($"FloodTestShip scene built: 12 compartments ({L}m cells), SciFi Warehouse Kit walls");
+        Debug.Log($"FloodTestShip scene built: {comps.Length} compartments ({L}m cells), SciFi Warehouse Kit walls");
     }
 
     // ===== Wall/Floor placement helpers =====
@@ -974,9 +1027,9 @@ public static class FloodTestShipBuilder
         float intThick = 0.1f;
         InteriorPanel("EastWall_BelowWin", new Vector3(intX, (12f + winY0) * 0.5f, 3f),
             new Vector3(intThick, winY0 - 12f, W));
-        // Interior wall above window (y=16.5..18)
-        InteriorPanel("EastWall_AboveWin", new Vector3(intX, (winY1 + 18f) * 0.5f, 3f),
-            new Vector3(intThick, 18f - winY1, W));
+        // Interior wall above window (y=16.5..24, covers upper deck + sail deck east face)
+        InteriorPanel("EastWall_AboveWin", new Vector3(intX, (winY1 + 24f) * 0.5f, 3f),
+            new Vector3(intThick, 24f - winY1, W));
         // Interior wall left of window (z=0..1)
         InteriorPanel("EastWall_LeftWin", new Vector3(intX, winCY, winZ0 * 0.5f),
             new Vector3(intThick, winH, winZ0));

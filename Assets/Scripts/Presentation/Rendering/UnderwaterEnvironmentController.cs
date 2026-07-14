@@ -9,9 +9,9 @@ namespace SFP.Presentation
     // constants consumed by Underwater.shader / UnderwaterRendererFeature.
     public sealed class UnderwaterEnvironmentController : MonoBehaviour
     {
-        // Ship hull AABB in design-time coordinates (CLAUDE.md: x 0..24, y 0..18, z 0..6).
+        // Ship hull AABB in design-time coordinates (x 0..24, y 0..24, z 0..6).
         static readonly Vector3 HullMin = new(0f, 0f, 0f);
-        static readonly Vector3 HullMax = new(24f, 18f, 6f);
+        static readonly Vector3 HullMax = new(24f, 24f, 6f);
 
         // Fallback optical constants (mirrors UnderwaterVolumeComponent defaults) for frames
         // where the Volume stack hasn't been populated yet.

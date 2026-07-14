@@ -100,7 +100,7 @@ namespace SFP.Presentation
         {
             Vector3 sl = bridge.WorldToShip(cam.transform.position);
             return sl.x >= 0f && sl.x <= 24f &&
-                   sl.y >= 0f && sl.y <= 18f &&
+                   sl.y >= 0f && sl.y <= 24f &&
                    sl.z >= 0f && sl.z <= 6f;
         }
 

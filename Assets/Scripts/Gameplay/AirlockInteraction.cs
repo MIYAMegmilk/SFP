@@ -81,7 +81,7 @@ namespace SFP.Gameplay
         {
             if (bridge.Terrain == null || bridge.SubState == null) return;
 
-            Vector3 hatchShipLocal = new Vector3(21f, 0.5f, 4.5f);
+            Vector3 hatchShipLocal = new Vector3(23f, 18.5f, 4.5f);
             Vector3 exteriorPos = bridge.ShipToWorld(hatchShipLocal) + Vector3.down * 3f;
 
             float floorY = -bridge.Terrain.GetFloorDepthAt(exteriorPos.x, exteriorPos.z);
@@ -98,7 +98,7 @@ namespace SFP.Gameplay
             var bridge = SimulationBridge.Instance;
             if (bridge?.SubState == null) return;
 
-            Vector3 hatchShipLocal = new Vector3(21f, 0.5f, 4.5f);
+            Vector3 hatchShipLocal = new Vector3(23f, 18.5f, 4.5f);
             Vector3 hatchWorld = bridge.ShipToWorld(hatchShipLocal);
             float dist = Vector3.Distance(player.transform.position, hatchWorld);
 
@@ -120,7 +120,7 @@ namespace SFP.Gameplay
                         var outerHatch = bridge.Graph.Openings[state.OuterHatchOpeningId];
                         if (outerHatch.IsOpen)
                         {
-                            player.ExitEVA(new Vector3(21f, 0.6f, 3f));
+                            player.ExitEVA(new Vector3(21f, 18.6f, 3f));
                             state.RequestDrain();
                             ShowMessage("RE-ENTERED — DRAINING", Color.yellow);
                         }
@@ -228,7 +228,7 @@ namespace SFP.Gameplay
                 GUI.DrawTexture(new Rect(barX + 1, sh - 107, (barW - 2) * player.OxygenFraction, 6), barTex);
                 GUI.color = Color.white;
 
-                Vector3 hatchWorld = bridge.ShipToWorld(new Vector3(21f, 0.5f, 4.5f));
+                Vector3 hatchWorld = bridge.ShipToWorld(new Vector3(23f, 18.5f, 4.5f));
                 float dist = Vector3.Distance(player.transform.position, hatchWorld);
                 var hintStyle = new GUIStyle(GUI.skin.label)
                 {

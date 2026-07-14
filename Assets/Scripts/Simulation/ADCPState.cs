@@ -41,7 +41,7 @@ namespace SFP.Simulation
         float _reversalAccumulator;
         int _reversalCount;
 
-        public void Tick(OceanCurrentField field, float shipX, float shipZ, float shipDepth, PowerGrid power)
+        public void Tick(float dt, OceanCurrentField field, float shipX, float shipZ, float shipDepth, PowerGrid power)
         {
             bool hasPower = true;
             if (PowerNodeId >= 0 && power != null)
@@ -87,7 +87,6 @@ namespace SFP.Simulation
             }
 
             // History recording
-            float dt = 1f / 30f; // assumed tick rate
             _recordTimer += dt;
             if (_recordTimer >= RecordInterval)
             {

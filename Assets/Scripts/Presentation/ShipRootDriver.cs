@@ -7,7 +7,7 @@ namespace SFP.Presentation
     // separate remote proxy (M6 Phase 1).
     //
     // THE INVARIANT: simulation space == ship-local space == the authored build coordinates
-    // (x 0..24, y 0..18, z 0..6). The authored ship center c = (12, 9, 3) must land at world
+    // (x 0..24, y 0..24, z 0..6). The authored ship center c = (12, 9, 3) must land at world
     // position p = (sub.PositionX, -sub.Depth, sub.PositionZ) every frame.
     //
     // Heading axis: SubmarineState.Tick advances PositionX/Z by (sin H, 0, cos H) * speed, so

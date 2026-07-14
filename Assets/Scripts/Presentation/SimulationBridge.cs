@@ -21,7 +21,7 @@ namespace SFP.Presentation
         // Assigned by FloodTestShipBuilder: the transform ShipRootDriver moves every frame to
         // carry the whole interior (Hull + Player + ladders + devices) through the ocean world.
         // THE INVARIANT: simulation space == ship-local space == the authored build coordinates
-        // (x 0..24, y 0..18, z 0..6). BuildGraph (Awake) runs while this is still at identity, so
+        // (x 0..24, y 0..24, z 0..6). BuildGraph (Awake) runs while this is still at identity, so
         // any transform reads there are already ship-local; everything read at RUNTIME must be
         // converted via WorldToShip/ShipToWorld before it is compared against or fed into sim state.
         public Transform ShipRootRef;
@@ -437,6 +437,7 @@ namespace SFP.Presentation
                     InnerDoorOpeningId = ad.InnerDoor != null ? ad.InnerDoor.SimIndex : -1,
                     OuterHatchOpeningId = ad.OuterHatch != null ? ad.OuterHatch.SimIndex : -1,
                     FloodValveOpeningId = ad.FloodValve != null ? ad.FloodValve.SimIndex : -1,
+                    FloorHatchOpeningId = ad.FloorHatch != null ? ad.FloorHatch.SimIndex : -1,
                     PowerNodeId = aNode.Id,
                     PowerConsumption = ad.PowerConsumption,
                 };
@@ -504,6 +505,9 @@ namespace SFP.Presentation
 
         void Update()
         {
+            if (NetworkBootstrap.Instance != null && !NetworkBootstrap.Instance.IsServer)
+                return;
+
             _tickAccumulator += Time.deltaTime;
             while (_tickAccumulator >= _dt)
             {
@@ -555,7 +559,7 @@ namespace SFP.Presentation
                 for (int i = 0; i < _sonars.Count; i++)
                     _sonars[i].Tick(_dt, _powerGrid, _subState, Terrain, MineSystem, Creatures, OceanCurrents);
                 for (int i = 0; i < _adcps.Count; i++)
-                    _adcps[i].Tick(OceanCurrents, _subState.PositionX, _subState.PositionZ, _subState.Depth, _powerGrid);
+                    _adcps[i].Tick(_dt, OceanCurrents, _subState.PositionX, _subState.PositionZ, _subState.Depth, _powerGrid);
                 for (int i = 0; i < _fabricators.Count; i++)
                     _fabricators[i].Tick(_dt, _powerGrid);
                 if (_fireSystem != null)

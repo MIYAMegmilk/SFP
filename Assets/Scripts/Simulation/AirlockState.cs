@@ -10,6 +10,7 @@ namespace SFP.Simulation
         public int InnerDoorOpeningId;
         public int OuterHatchOpeningId;
         public int FloodValveOpeningId;
+        public int FloorHatchOpeningId = -1;
         public int PowerNodeId = -1;
 
         // 250 kW pump — sized so 216 m³ × 95% drains in ~25 s at 200 m
@@ -30,6 +31,7 @@ namespace SFP.Simulation
             var innerDoor = graph.Openings[InnerDoorOpeningId];
             var outerHatch = graph.Openings[OuterHatchOpeningId];
             var floodValve = graph.Openings[FloodValveOpeningId];
+            Opening floorHatch = FloorHatchOpeningId >= 0 ? graph.Openings[FloorHatchOpeningId] : null;
 
             float hatchY = outerHatch.CenterY;
             float ambientAtm = GasFlowMath.ExternalPressureAtm(graph.SeaLevelY, hatchY);
@@ -37,16 +39,16 @@ namespace SFP.Simulation
             switch (Phase)
             {
                 case AirlockPhase.Dry:
-                    TickDry(innerDoor, outerHatch, floodValve);
+                    TickDry(innerDoor, outerHatch, floodValve, floorHatch);
                     break;
                 case AirlockPhase.Flooding:
-                    TickFlooding(dt, comp, innerDoor, outerHatch, floodValve, ambientAtm);
+                    TickFlooding(dt, comp, innerDoor, outerHatch, floodValve, floorHatch, ambientAtm);
                     break;
                 case AirlockPhase.Flooded:
-                    TickFlooded(innerDoor, outerHatch, floodValve, ambientAtm);
+                    TickFlooded(innerDoor, outerHatch, floodValve, floorHatch, ambientAtm);
                     break;
                 case AirlockPhase.Draining:
-                    TickDraining(dt, comp, innerDoor, outerHatch, floodValve, water, sub, power);
+                    TickDraining(dt, comp, innerDoor, outerHatch, floodValve, floorHatch, water, sub, power);
                     break;
             }
         }
@@ -56,6 +58,7 @@ namespace SFP.Simulation
             if (Phase != AirlockPhase.Dry) return false;
             var innerDoor = graph.Openings[InnerDoorOpeningId];
             if (innerDoor.IsOpen) return false;
+            if (FloorHatchOpeningId >= 0 && graph.Openings[FloorHatchOpeningId].IsOpen) return false;
             Phase = AirlockPhase.Flooding;
             return true;
         }
@@ -67,9 +70,23 @@ namespace SFP.Simulation
             return true;
         }
 
-        void TickDry(Opening innerDoor, Opening outerHatch, Opening floodValve)
+        void LockFloorHatch(Opening floorHatch)
+        {
+            if (floorHatch == null) return;
+            floorHatch.IsOpen = false;
+            floorHatch.IsLocked = true;
+        }
+
+        void UnlockFloorHatch(Opening floorHatch)
+        {
+            if (floorHatch == null) return;
+            floorHatch.IsLocked = false;
+        }
+
+        void TickDry(Opening innerDoor, Opening outerHatch, Opening floodValve, Opening floorHatch)
         {
             innerDoor.IsLocked = false;
+            UnlockFloorHatch(floorHatch);
             outerHatch.IsOpen = false;
             outerHatch.IsLocked = true;
             floodValve.IsOpen = false;
@@ -77,10 +94,11 @@ namespace SFP.Simulation
         }
 
         void TickFlooding(float dt, Compartment comp, Opening innerDoor,
-                          Opening outerHatch, Opening floodValve, float ambientAtm)
+                          Opening outerHatch, Opening floodValve, Opening floorHatch, float ambientAtm)
         {
             innerDoor.IsOpen = false;
             innerDoor.IsLocked = true;
+            LockFloorHatch(floorHatch);
             outerHatch.IsOpen = false;
             outerHatch.IsLocked = true;
 
@@ -103,10 +121,11 @@ namespace SFP.Simulation
         }
 
         void TickFlooded(Opening innerDoor, Opening outerHatch, Opening floodValve,
-                         float ambientAtm)
+                         Opening floorHatch, float ambientAtm)
         {
             innerDoor.IsOpen = false;
             innerDoor.IsLocked = true;
+            LockFloorHatch(floorHatch);
             floodValve.IsOpen = false;
             floodValve.IsLocked = true;
 
@@ -115,13 +134,14 @@ namespace SFP.Simulation
         }
 
         void TickDraining(float dt, Compartment comp, Opening innerDoor,
-                          Opening outerHatch, Opening floodValve,
+                          Opening outerHatch, Opening floodValve, Opening floorHatch,
                           ShallowWaterSystem water, SubmarineState sub, PowerGrid power)
         {
             outerHatch.IsOpen = false;
             outerHatch.IsLocked = true;
             innerDoor.IsOpen = false;
             innerDoor.IsLocked = true;
+            LockFloorHatch(floorHatch);
             floodValve.IsOpen = false;
             floodValve.IsLocked = true;
 
@@ -163,6 +183,7 @@ namespace SFP.Simulation
             var node = power.GetNode(PowerNodeId);
             if (node == null) return true;
             node.IsEnabled = true;
+            node.Consumption = PowerConsumption;
             return node.IsActive;
         }
 

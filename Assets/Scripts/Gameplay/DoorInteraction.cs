@@ -26,18 +26,24 @@ namespace SFP.Gameplay
             var openingDef = hit.collider.GetComponentInParent<OpeningDefinition>();
             if (openingDef == null) return;
             if (openingDef.Kind == SFP.Simulation.OpeningKind.Breach) return;
+            if (openingDef.SimIndex < 0) return;
 
-            var bridge = SimulationBridge.Instance;
-            if (openingDef.SimIndex >= 0 && bridge != null)
+            var relay = DeviceRpcRelay.Instance;
+            if (relay != null)
             {
-                var opening = bridge.Graph.Openings[openingDef.SimIndex];
-                if (opening.IsLocked) return;
-                opening.IsOpen = !opening.IsOpen;
-                openingDef.IsOpen = opening.IsOpen;
+                relay.RequestToggleDoor(openingDef.SimIndex);
             }
             else
             {
-                openingDef.IsOpen = !openingDef.IsOpen;
+                // Standalone / no network: apply directly
+                var bridge = SimulationBridge.Instance;
+                if (bridge?.Graph != null)
+                {
+                    var opening = bridge.Graph.Openings[openingDef.SimIndex];
+                    if (opening.IsLocked) return;
+                    opening.IsOpen = !opening.IsOpen;
+                    openingDef.IsOpen = opening.IsOpen;
+                }
             }
         }
     }

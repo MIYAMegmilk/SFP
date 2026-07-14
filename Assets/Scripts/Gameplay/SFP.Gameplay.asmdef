@@ -4,7 +4,8 @@
     "references": [
         "SFP.Simulation",
         "SFP.Presentation",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.Netcode.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

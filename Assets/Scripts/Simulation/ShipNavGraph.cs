@@ -188,6 +188,9 @@ namespace SFP.Simulation
 
         float EdgeCost(Opening o, int from, int to, FireSystem fire)
         {
+            if (o.IsLocked && !o.IsOpen)
+                return float.MaxValue;
+
             var compFrom = _graph.GetCompartment(from);
             var compTo = _graph.GetCompartment(to);
 

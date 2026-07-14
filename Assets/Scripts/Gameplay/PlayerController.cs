@@ -78,6 +78,9 @@ namespace SFP.Gameplay
 
         void Update()
         {
+            var netCtrl = GetComponent<PlayerNetworkController>();
+            if (netCtrl != null && !netCtrl.IsLocalPlayer) return;
+
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;
